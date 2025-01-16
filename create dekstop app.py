@@ -48,7 +48,7 @@ import datetime
 import ttkbootstrap as tb
 from ttkbootstrap import Style
 from tkinter import Tk
-
+from key_request_function import request_access_window
 # Initialize the app with a white theme
 style = Style(theme="flatly")  # Start with a white-based theme
 root = style.master
@@ -103,7 +103,8 @@ def create_user_table():
     cursor = conn.cursor()
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
-            email TEXT PRIMARY KEY,
+            user_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            email TEXT NOT NULL,
             password TEXT NOT NULL,
             first_name TEXT NOT NULL,
             last_name TEXT NOT NULL,
@@ -114,6 +115,7 @@ def create_user_table():
     ''')
     conn.commit()
     conn.close()
+    
 
 def create_file_activity_table():
     conn = sqlite3.connect('app_data.db')
