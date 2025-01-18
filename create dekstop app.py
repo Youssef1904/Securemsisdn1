@@ -41,7 +41,13 @@ from datetime import datetime
 import tkinter as tk
 from tkinter import Toplevel, messagebox
 import datetime  
-
+from io import BytesIO
+import pandas as pd
+from Crypto.Cipher import AES, PKCS1_OAEP
+from Crypto.Random import get_random_bytes
+import base64
+import os
+from tkinter import messagebox, filedialog
 
 
 # Initialize the app with a dark theme
@@ -641,45 +647,88 @@ def encrypt_selected_text(text_widget, file_path):
         messagebox.showinfo("Success", f"Encrypted Word file saved at {updated_file_path}")
 
 
+from io import BytesIO
+import pandas as pd
 
+def read_excel_safely(file_path):
+    """
+    Safely reads an Excel file, handling both string paths and bytes objects.
 
+    Parameters:
+        file_path (str or bytes): Path to the Excel file or a bytes object.
 
-def encrypt_data():
+    Returns:
+        DataFrame: The loaded DataFrame.
+    """
     try:
-        if not file_path:
-            messagebox.showerror("Error", "Please upload an Excel file first.")
+        if isinstance(file_path, bytes):
+            # If file_path is bytes, treat it as in-memory Excel data
+            print("Detected bytes input. Processing as BytesIO.")
+            file_path = BytesIO(file_path)
+
+        # Load the Excel file with the appropriate engine
+        return pd.read_excel(file_path, engine='openpyxl')
+    except Exception as e:
+        raise ValueError(f"Failed to read the Excel file: {e}")
+
+
+
+
+
+
+def encrypt_data(selected_cells, file_path):
+    """
+    Encrypts the selected cells in an Excel file using a hybrid encryption method (AES + RSA).
+
+    Parameters:
+        selected_cells (list of tuples): List of (row_index, col_name) tuples specifying cells to encrypt.
+        file_path (str or bytes): Path to the Excel file or a bytes object.
+
+    Returns:
+        None: Saves the encrypted file and AES key to disk.
+    """
+    try:
+        if not selected_cells:
+            messagebox.showerror("Error", "No cells selected for encryption.")
             return
+        # Debug: Check the input file
+        print(f"File path received: {file_path}")
+        print(f"Type of file_path: {type(file_path)}")
+        # Safely read the Excel file
+       
+
+        df = read_excel_safely(file_path)
 
         # Load RSA public key
-        public_key, _ = load_rsa_keys()
-
-        # Load the Excel file into a DataFrame
-        df = pd.read_excel(file_path)
-
-        # Prompt the user to select columns for encryption
-        selected_columns = simpledialog.askstring(
-            "Select Columns",
-            "Enter the column names to encrypt, separated by commas (e.g., 'MSISDN, Name')"
-        )
-        if not selected_columns:
-            messagebox.showerror("Error", "No columns selected for encryption.")
-            return
-
-        # Validate and split column names
-        selected_columns = [col.strip() for col in selected_columns.split(",")]
-        missing_columns = [col for col in selected_columns if col not in df.columns]
-        if missing_columns:
-            messagebox.showerror("Error", f"Column(s) not found: {', '.join(missing_columns)}")
-            return
+        public_key, _ = load_rsa_keys()  # Ensure this function is defined elsewhere
 
         # Generate AES key
-        aes_key = os.urandom(16)
+        aes_key = get_random_bytes(16)
 
-        # Encrypt AES key using the RSA public key
+        # Encrypt AES key using RSA
         cipher_rsa = PKCS1_OAEP.new(public_key)
         encrypted_aes_key = cipher_rsa.encrypt(aes_key)
 
-        # Save the encrypted AES key alongside the encrypted file
+        # Save the encrypted AES key
+        aes_key_file = os.path.splitext(file_path if isinstance(file_path, str) else "encrypted_file")[0] + "_aes_key.bin"
+        with open(aes_key_file, 'wb') as f:
+            f.write(encrypted_aes_key)
+
+        # Function to encrypt a single cell value
+        def encrypt_cell(value, aes_key):
+            if pd.isna(value):  # Skip NaN values
+                return value
+            cipher_aes = AES.new(aes_key, AES.MODE_EAX)
+            nonce = cipher_aes.nonce
+            ciphertext, tag = cipher_aes.encrypt_and_digest(str(value).encode('utf-8'))
+            return base64.b64encode(nonce + tag + ciphertext).decode('utf-8')
+
+        # Encrypt the selected cells
+        for row_index, col_name in selected_cells:
+            value = df.at[row_index, col_name]  # Get the cell value
+            df.at[row_index, col_name] = encrypt_cell(value, aes_key)  # Encrypt and update the value
+
+        # Save the updated file
         encrypted_file_path = filedialog.asksaveasfilename(
             defaultextension=".xlsx",
             filetypes=[("Excel files", "*.xlsx")],
@@ -689,21 +738,12 @@ def encrypt_data():
             messagebox.showerror("Error", "File save operation was canceled.")
             return
 
-        aes_key_file = os.path.splitext(encrypted_file_path)[0] + "_aes_key.bin"
-        with open(aes_key_file, 'wb') as f:
-            f.write(encrypted_aes_key)
-
-        # Encrypt cell data
-        for col in selected_columns:
-            df[col] = df[col].astype(str).apply(lambda x: encrypt_data(x, aes_key))
-
-        # Save the encrypted DataFrame to a file
         df.to_excel(encrypted_file_path, index=False)
 
-        # Provide feedback to the user
+        # Provide feedback
         messagebox.showinfo(
             "Success",
-            f"Data encrypted and saved to:\n{encrypted_file_path}\nAES key saved to:\n{aes_key_file}"
+            f"Encrypted Excel file saved to:\n{encrypted_file_path}\nAES key saved to:\n{aes_key_file}"
         )
 
         # Log the file activity into the database
@@ -713,10 +753,12 @@ def encrypt_data():
             department=current_user_department,
             filename=os.path.basename(encrypted_file_path),
             file_size=os.path.getsize(encrypted_file_path),
-            activity_type="Encryption",
+            activity_type="Cell Encryption",
             key=base64.b64encode(aes_key).decode('utf-8')
         )
 
+    except ValueError as e:
+        messagebox.showerror("Error", f"Invalid file format: {e}")
     except Exception as e:
         messagebox.showerror("Error", f"Encryption failed: {e}")
 
