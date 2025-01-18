@@ -98,40 +98,7 @@ SECURITY_QUESTIONS = [
     "What was the make of your first car?"
 ]
 
-def create_user_table():
-    conn = sqlite3.connect('users.db')
-    cursor = conn.cursor()
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            user_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            email TEXT NOT NULL,
-            password TEXT NOT NULL,
-            first_name TEXT NOT NULL,
-            last_name TEXT NOT NULL,
-            department TEXT NOT NULL,
-            security_question TEXT,
-            security_answer TEXT
-        )
-    ''')
-    conn.commit()
-    conn.close()
-    
 
-def create_file_activity_table():
-    conn = sqlite3.connect('app_data.db')
-    cursor = conn.cursor()
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS file_activities (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_email TEXT NOT NULL,
-            department TEXT NOT NULL,
-            filename TEXT NOT NULL,
-            file_size INTEGER NOT NULL,
-            timestamp TEXT NOT NULL
-        )
-    ''')
-    conn.commit()
-    conn.close()
 
 
     
@@ -360,7 +327,7 @@ def init_db():
     global conn, cursor
     conn = sqlite3.connect('app_data.db')
     cursor = conn.cursor()
-    create_file_activity_table()  # Call this to create the table if it doesn't exist
+
 
 
 def open_file(filename):
@@ -376,20 +343,33 @@ def open_file(filename):
     except Exception as e:
         messagebox.showerror("Error", f"Unable to open file: {e}")
         
-# Import datetime module correctly
-import datetime
 
-def log_file_activity(user_email, department, filename, file_size, key, activity_type="Encryption"):
+
+def log_file_activity(user_id, user_email, department, filename, file_size, key, activity_type="Encryption"):
     """
-    Logs a file activity (encryption or decryption) into the database.
+    Logs a file activity (encryption or decryption) into the file_activities table.
+    
+    Table Schema (file_activities):
+    -------------------------------------------------
+    id            INTEGER PRIMARY KEY AUTOINCREMENT
+    user_id       INTEGER NOT NULL
+    user_email    TEXT NOT NULL
+    department    TEXT NOT NULL
+    filename      TEXT NOT NULL
+    file_size     INTEGER NOT NULL
+    timestamp     TEXT NOT NULL
+    activity_type TEXT NOT NULL
+    key           TEXT
+    -------------------------------------------------
 
     Parameters:
-        user_email (str): Email of the user performing the activity.
-        department (str): Department of the user.
-        filename (str): Name of the file being encrypted or decrypted.
-        file_size (int): Size of the file in bytes.
+        user_id (int): The auto-increment PK of the user performing the activity.
+        user_email (str): The email of the user.
+        department (str): The department of the user.
+        filename (str): The name of the file being encrypted or decrypted.
+        file_size (int): The size of the file in bytes.
         key (str): The key used for encryption or decryption (will be encrypted before saving).
-        activity_type (str): Type of activity ("Encryption" or "Decryption"). Default is "Encryption".
+        activity_type (str): "Encryption" or "Decryption" (default: "Encryption").
     """
     try:
         # Connect to the SQLite database
@@ -397,22 +377,26 @@ def log_file_activity(user_email, department, filename, file_size, key, activity
         cursor = conn.cursor()
 
         # Get the current timestamp
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        # Encrypt the key before saving (pass the master_key)
+        # Encrypt the key before saving, assuming encrypt_key() and MASTER_KEY exist
         encrypted_key = encrypt_key(key.encode('utf-8'), MASTER_KEY)
 
         # Insert the activity log into the database
         cursor.execute('''
-            INSERT INTO file_activities (user_email, department, filename, file_size, timestamp, key_used, activity_type)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', (user_email, department, filename, file_size, timestamp, encrypted_key, activity_type))
+            INSERT INTO file_activities (
+                user_id, user_email, department, filename, file_size, timestamp, activity_type, key
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (user_id, user_email, department, filename, file_size, current_time, activity_type, encrypted_key))
 
         # Commit changes and close connection
         conn.commit()
         conn.close()
+
     except Exception as e:
         print(f"Error logging file activity: {e}")
+
 
 
 
@@ -424,6 +408,238 @@ def upload_file():
     file_path = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx")])
     if file_path:
         messagebox.showinfo("File Selected", f"File selected: {file_path}")
+
+def open_document_encryption_tool():
+    tool_window = tk.Toplevel()
+    tool_window.title("Document Encryption Tool")
+    tool_window.geometry("800x600")
+
+    tk.Label(tool_window, text="Upload a Word or Excel file:", font=("Arial", 12)).pack(pady=10)
+    file_path_var = tk.StringVar()
+
+    def upload_document():
+        file_path = filedialog.askopenfilename(
+            filetypes=[("Word and Excel Files", "*.docx *.xlsx"), ("Word Documents", "*.docx"), ("Excel Files", "*.xlsx")]
+        )
+        if file_path:
+            file_path_var.set(file_path)
+            process_document(file_path)
+
+    tk.Button(tool_window, text="Upload Document", command=upload_document).pack(pady=10)
+    tk.Entry(tool_window, textvariable=file_path_var, state="readonly", width=60).pack(pady=5)
+
+    content_frame = tk.Frame(tool_window)
+    content_frame.pack(fill="both", expand=True, padx=10, pady=10)
+
+    def process_document(file_path):
+        # Clear the content_frame
+        for widget in content_frame.winfo_children():
+            widget.destroy()
+
+        # Check file extension and process accordingly
+        if file_path.endswith(".xlsx"):
+            display_excel_content(file_path, content_frame)
+        elif file_path.endswith(".docx"):
+            display_word_content(file_path, content_frame)
+        else:
+            messagebox.showerror("Error", "Unsupported file type. Please upload a .docx or .xlsx file.")
+
+    tk.Button(tool_window, text="Return", command=tool_window.destroy).pack(pady=10)
+
+def display_excel_content(file_path, parent_frame):
+    import pandas as pd
+
+    try:
+        # Load Excel data
+        df = pd.read_excel(file_path)
+
+        # Treeview for data preview (enable cell selection)
+        tree = ttk.Treeview(parent_frame, selectmode="none")
+        tree.pack(side="left", fill="both", expand=True)
+
+        # Scrollbar for Treeview
+        tree_scroll = ttk.Scrollbar(parent_frame, orient="vertical", command=tree.yview)
+        tree_scroll.pack(side="left", fill="y")
+        tree.configure(yscrollcommand=tree_scroll.set)
+
+        # Configure columns
+        tree["columns"] = list(df.columns)
+        tree["show"] = "headings"
+
+        for col in df.columns:
+            tree.heading(col, text=col)
+            tree.column(col, width=100)
+
+        # Insert rows
+        for idx, row in df.iterrows():
+            tree.insert("", "end", values=list(row))
+
+        # Listbox to show selected cells
+        listbox_frame = tk.Frame(parent_frame)
+        listbox_frame.pack(side="right", fill="both", expand=True, padx=10)
+        tk.Label(listbox_frame, text="Selected Cells:").pack(pady=5)
+
+        selected_listbox = tk.Listbox(listbox_frame, height=15, width=40)
+        selected_listbox.pack(fill="both", expand=True)
+
+        # Store selected cells
+        selected_cells = []
+
+        # Function to handle cell selection
+        def on_cell_click(event):
+            # Identify the row and column of the clicked cell
+            region = tree.identify("region", event.x, event.y)
+            if region == "cell":
+                row_id = tree.identify_row(event.y)  # Get row ID
+                col_id = tree.identify_column(event.x)  # Get column ID (e.g., '#1')
+
+                # Get actual column name
+                col_index = int(col_id.strip("#")) - 1
+                col_name = df.columns[col_index]
+
+                # Get cell value
+                row_index = tree.index(row_id)
+                cell_value = df.iloc[row_index, col_index]
+
+                # Toggle selection
+                cell = (row_index, col_name)
+                if cell in selected_cells:
+                    selected_cells.remove(cell)  # Deselect if already selected
+                    # Remove from Listbox
+                    for i, item in enumerate(selected_listbox.get(0, tk.END)):
+                        if item == f"Row {row_index + 1}, Column '{col_name}'":
+                            selected_listbox.delete(i)
+                            break
+                else:
+                    selected_cells.append(cell)  # Add to selection
+                    # Add to Listbox
+                    selected_listbox.insert(tk.END, f"Row {row_index + 1}, Column '{col_name}'")
+
+        # Bind click event
+        tree.bind("<Button-1>", on_cell_click)
+
+        # Add encryption button
+        def encrypt_selected_cells():
+            """
+            Encrypts the user-selected cells in the Excel file.
+            """
+            if not selected_cells:
+                messagebox.showerror("Error", "No cells selected for encryption.")
+                return
+
+            try:
+                # Generate an AES key (replace with secure key management if required)
+                aes_key = os.urandom(16)
+
+                # Encrypt the selected cells
+                for row_index, col_name in selected_cells:
+                    value = df.at[row_index, col_name]  # Get the cell value
+                    if pd.notna(value):  # Only encrypt non-NaN values
+                        try:
+                            encrypted_value = encrypt_data(str(value), aes_key)  # Encrypt the cell value
+                            df.at[row_index, col_name] = encrypted_value  # Update the DataFrame
+                        except Exception as encryption_error:
+                            messagebox.showwarning(
+                                "Encryption Warning",
+                                f"Failed to encrypt cell at Row {row_index + 1}, Column '{col_name}': {encryption_error}"
+                            )
+
+                # Save the updated file
+                updated_file_path = filedialog.asksaveasfilename(
+                    defaultextension=".xlsx",
+                    filetypes=[("Excel files", "*.xlsx")],
+                    title="Save Encrypted Excel File"
+                )
+                if not updated_file_path:
+                    messagebox.showerror("Error", "File save operation was canceled.")
+                    return
+
+                # Save the DataFrame to the specified file path
+                df.to_excel(updated_file_path, index=False)
+
+                # Save the AES key as a separate file
+                aes_key_file_path = os.path.splitext(updated_file_path)[0] + "_aes_key.bin"
+                with open(aes_key_file_path, "wb") as aes_file:
+                    aes_file.write(aes_key)
+
+                # Show success message
+                messagebox.showinfo(
+                    "Success",
+                    f"Encrypted Excel file saved to:\n{updated_file_path}\nAES key saved to:\n{aes_key_file_path}"
+                )
+
+                # Log the activity (if a logging function exists)
+                log_file_activity(
+                    user_id=current_user_id,
+                    user_email=current_user_email,
+                    department=current_user_department,
+                    filename=os.path.basename(updated_file_path),
+                    file_size=os.path.getsize(updated_file_path),
+                    activity_type="Cell Encryption",
+                    key=base64.b64encode(aes_key).decode('utf-8')
+                )
+
+            except Exception as e:
+                messagebox.showerror("Error", f"Encryption failed: {e}")
+
+
+
+        tk.Button(
+            listbox_frame,
+            text="Encrypt Selected Cells",
+            command=encrypt_selected_cells
+        ).pack(pady=10)
+
+    except Exception as e:
+        messagebox.showerror("Error", f"Failed to load Excel file: {e}")
+
+
+def display_word_content(file_path, parent_frame):
+    from docx import Document
+
+    try:
+        # Load Word document
+        doc = Document(file_path)
+        text_widget = tk.Text(parent_frame, wrap="word")
+        text_widget.pack(fill="both", expand=True)
+
+        # Insert document text into the Text widget
+        for para in doc.paragraphs:
+            text_widget.insert("end", para.text + "\n")
+
+        # Add encryption button
+        tk.Button(
+            parent_frame,
+            text="Encrypt Selected Text",
+            command=lambda: encrypt_selected_text(text_widget, file_path)
+        ).pack(pady=10)
+
+    except Exception as e:
+        messagebox.showerror("Error", f"Failed to load Word file: {e}")
+
+def encrypt_selected_text(text_widget, file_path):
+    from docx import Document
+    from cryptography.fernet import Fernet
+
+    selected_text = text_widget.selection_get()
+    if not selected_text:
+        messagebox.showerror("Error", "Please highlight text to encrypt.")
+        return
+
+    key = Fernet.generate_key()
+    cipher = Fernet(key)
+    encrypted_text = cipher.encrypt(selected_text.encode()).decode()
+
+    # Modify the Word file (or a copy)
+    doc = Document(file_path)
+    for para in doc.paragraphs:
+        para.text = para.text.replace(selected_text, encrypted_text)
+
+    updated_file_path = filedialog.asksaveasfilename(defaultextension=".docx", filetypes=[("Word documents", "*.docx")])
+    if updated_file_path:
+        doc.save(updated_file_path)
+        messagebox.showinfo("Success", f"Encrypted Word file saved at {updated_file_path}")
+
 
 
 
@@ -440,13 +656,21 @@ def encrypt_data():
         # Load the Excel file into a DataFrame
         df = pd.read_excel(file_path)
 
-        # Check if 'MSISDN' column is present
-        if 'MSISDN' not in df.columns:
-            messagebox.showerror("Error", "'MSISDN' column not found in the Excel file.")
+        # Prompt the user to select columns for encryption
+        selected_columns = simpledialog.askstring(
+            "Select Columns",
+            "Enter the column names to encrypt, separated by commas (e.g., 'MSISDN, Name')"
+        )
+        if not selected_columns:
+            messagebox.showerror("Error", "No columns selected for encryption.")
             return
 
-        # Ensure MSISDN column is treated as strings
-        df['MSISDN'] = df['MSISDN'].astype(str)
+        # Validate and split column names
+        selected_columns = [col.strip() for col in selected_columns.split(",")]
+        missing_columns = [col for col in selected_columns if col not in df.columns]
+        if missing_columns:
+            messagebox.showerror("Error", f"Column(s) not found: {', '.join(missing_columns)}")
+            return
 
         # Generate AES key
         aes_key = os.urandom(16)
@@ -455,112 +679,159 @@ def encrypt_data():
         cipher_rsa = PKCS1_OAEP.new(public_key)
         encrypted_aes_key = cipher_rsa.encrypt(aes_key)
 
-        # Save the encrypted AES key with the encrypted file name
-        encrypted_file_path = filedialog.asksaveasfilename(defaultextension=".xlsx", filetypes=[("Excel files", "*.xlsx")])
+        # Save the encrypted AES key alongside the encrypted file
+        encrypted_file_path = filedialog.asksaveasfilename(
+            defaultextension=".xlsx",
+            filetypes=[("Excel files", "*.xlsx")],
+            title="Save Encrypted Excel File"
+        )
         if not encrypted_file_path:
-            messagebox.showerror("Error", "Please specify a valid file path to save the encrypted data.")
+            messagebox.showerror("Error", "File save operation was canceled.")
             return
 
         aes_key_file = os.path.splitext(encrypted_file_path)[0] + "_aes_key.bin"
         with open(aes_key_file, 'wb') as f:
             f.write(encrypted_aes_key)
 
-        # Encrypt each MSISDN value
-        def encrypt_msisdn(msisdn, aes_key):
-            cipher_aes = AES.new(aes_key, AES.MODE_EAX)
-            nonce = cipher_aes.nonce
-            ciphertext, tag = cipher_aes.encrypt_and_digest(msisdn.encode('utf-8'))
-            return base64.b64encode(nonce + tag + ciphertext).decode('utf-8')
+        # Encrypt cell data
+        for col in selected_columns:
+            df[col] = df[col].astype(str).apply(lambda x: encrypt_data(x, aes_key))
 
-        # Create Encrypted_MSISDN column
-        df['Encrypted_MSISDN'] = df['MSISDN'].apply(lambda msisdn: encrypt_msisdn(msisdn, aes_key))
-
-        # Remove original MSISDN column
-        df.drop(columns=['MSISDN'], inplace=True)
-
-        # Save the encrypted file
+        # Save the encrypted DataFrame to a file
         df.to_excel(encrypted_file_path, index=False)
 
-        # Provide feedback
-        messagebox.showinfo("Success", f"Data encrypted and saved to {encrypted_file_path}\nAES key saved to {aes_key_file}")
+        # Provide feedback to the user
+        messagebox.showinfo(
+            "Success",
+            f"Data encrypted and saved to:\n{encrypted_file_path}\nAES key saved to:\n{aes_key_file}"
+        )
 
         # Log the file activity into the database
         log_file_activity(
+            user_id=current_user_id,
             user_email=current_user_email,
             department=current_user_department,
             filename=os.path.basename(encrypted_file_path),
             file_size=os.path.getsize(encrypted_file_path),
-            key=base64.b64encode(aes_key).decode('utf-8'),
-            activity_type="Encryption"
+            activity_type="Encryption",
+            key=base64.b64encode(aes_key).decode('utf-8')
         )
+
     except Exception as e:
         messagebox.showerror("Error", f"Encryption failed: {e}")
 
 
 
+
+
+
+
+
 def decrypt_data():
     try:
+        # 1. Make sure a file is selected
         if not file_path:
             messagebox.showerror("Error", "Please upload an encrypted Excel file first.")
             return
 
-        # Determine the associated AES key file path
+        # 2. Convert file path to base name and check for an approved request
+        filename_only = os.path.basename(file_path)  # e.g., "data_encrypted.xlsx"
+
+       
+
+        conn = sqlite3.connect('ooredoo.db')
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT status 
+            FROM key_requests
+            WHERE user_id = ?
+              AND file_name = ?
+            ORDER BY request_id DESC
+            LIMIT 1
+        """, (current_user_id, filename_only))
+        row = cursor.fetchone()
+        conn.close()
+
+        if not row or row[0] != 'APPROVED':
+            messagebox.showerror("Error", "You do not have an approved request to decrypt this file.")
+            return
+
+        # 3. Determine the associated AES key file path
         key_file_path = os.path.splitext(file_path)[0] + "_aes_key.bin"
         if not os.path.exists(key_file_path):
             messagebox.showerror("Error", f"AES key file not found for {os.path.basename(file_path)}.")
             return
 
-        # Load the private RSA key
+        # 4. Load the private RSA key
         with open('private.pem', 'rb') as f:
             private_key = RSA.import_key(f.read())
 
-        # Load and decrypt the AES key
+        # 5. Decrypt the AES key with RSA
         with open(key_file_path, 'rb') as f:
             encrypted_aes_key = f.read()
         cipher_rsa = PKCS1_OAEP.new(private_key)
         aes_key = cipher_rsa.decrypt(encrypted_aes_key)
 
-        # Load the encrypted Excel data
+        # 6. Load the encrypted Excel data
         df = pd.read_excel(file_path)
 
-        # Check if 'Encrypted_MSISDN' column is present
+        # 7. Check if 'Encrypted_MSISDN' column is present
         if 'Encrypted_MSISDN' not in df.columns:
             messagebox.showerror("Error", "'Encrypted_MSISDN' column not found in the Excel file.")
             return
 
-        # Decrypt each Encrypted_MSISDN value
-        def decrypt_msisdn(enc_msisdn, aes_key):
+        # 8. Function to decrypt each MSISDN value
+        def decrypt_msisdn(enc_msisdn, key):
             data = base64.b64decode(enc_msisdn)
             nonce, tag, ciphertext = data[:16], data[16:32], data[32:]
-            cipher_aes = AES.new(aes_key, AES.MODE_EAX, nonce=nonce)
+            cipher_aes = AES.new(key, AES.MODE_EAX, nonce=nonce)
             return cipher_aes.decrypt_and_verify(ciphertext, tag).decode('utf-8')
 
-        # Create decrypted MSISDN column
-        df['MSISDN'] = df['Encrypted_MSISDN'].apply(lambda enc_msisdn: decrypt_msisdn(enc_msisdn, aes_key))
+        # 9. Create a 'MSISDN' column by decrypting the existing 'Encrypted_MSISDN' values
+        df['MSISDN'] = df['Encrypted_MSISDN'].apply(lambda enc: decrypt_msisdn(enc, aes_key))
 
-        # Remove Encrypted_MSISDN column
+        # 10. Remove the 'Encrypted_MSISDN' column
         df.drop(columns=['Encrypted_MSISDN'], inplace=True)
 
-        # Save the decrypted file
-        decrypted_file_path = filedialog.asksaveasfilename(defaultextension=".xlsx", filetypes=[("Excel files", "*.xlsx")])
+        # 11. Ask user where to save the decrypted file
+        decrypted_file_path = filedialog.asksaveasfilename(
+            defaultextension=".xlsx", 
+            filetypes=[("Excel files", "*.xlsx")]
+        )
         if not decrypted_file_path:
             messagebox.showerror("Error", "Please specify a valid file path to save the decrypted data.")
             return
 
         df.to_excel(decrypted_file_path, index=False)
 
-        # Provide feedback
+        # 12. Indicate success
         messagebox.showinfo("Success", f"Data decrypted and saved to {decrypted_file_path}")
 
-        # Log the file activity
+        # 13. Mark the request as acknowledged (ack_received=1)
+        conn = sqlite3.connect('ooredoo.db')
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE key_requests
+            SET ack_received = 1,
+                ack_timestamp = datetime('now')
+            WHERE user_id = ?
+              AND file_name = ?
+              AND status = 'APPROVED'
+        """, (current_user_id, filename_only))
+        conn.commit()
+        conn.close()
+
+        # 14. Log the file activity (using user_id, user_email, etc.)
         log_file_activity(
-            user_email=current_user_email,
+            user_id=current_user_id,
+            user_email=current_user_email,  # or pass something else if you prefer
             department=current_user_department,
             filename=os.path.basename(decrypted_file_path),
             file_size=os.path.getsize(decrypted_file_path),
-            key=base64.b64encode(aes_key).decode('utf-8'),
-            activity_type="Decryption"
+            activity_type="Decryption",
+            key=base64.b64encode(aes_key).decode('utf-8')
         )
+
     except Exception as e:
         messagebox.showerror("Error", f"Decryption failed: {e}")
 
@@ -582,35 +853,172 @@ def view_all_users():
 
     tb.Label(user_frame, text="All Registered Users", bootstyle="info").pack(pady=10)
 
-    users = get_all_users()  # Function that fetches all users from the database
-    columns = ('first_name', 'last_name', 'email')
+    # Fetch all users, including user_id, first_name, last_name, and email
+    users = get_all_users()  # This should return a list of dicts like [{"user_id": 1, "first_name": ..., ...}, ...]
+
+    # Updated columns to include user_id
+    columns = ('user_id', 'first_name', 'last_name', 'email')
+    
+    # Prepare row data for the Tableview
+    row_data = []
+    for user in users:
+        row_data.append((
+            user['user_id'],
+            user['first_name'],
+            user['last_name'],
+            user['email']
+        ))
+
     user_table = Tableview(
         master=user_frame,
         coldata=columns,
-        rowdata=[[user['first_name'], user['last_name'], user['email']] for user in users],
+        rowdata=row_data,
         bootstyle="info"
     )
     user_table.pack(pady=10, fill='both', expand=True)
 
     # Button to remove users
-    tb.Button(user_frame, text="Remove Selected User", command=lambda: remove_selected_user(user_table), bootstyle="danger-outline").pack(pady=10)
+    tb.Button(
+        user_frame,
+        text="Remove Selected User",
+        command=lambda: remove_selected_user(user_table),
+        bootstyle="danger-outline"
+    ).pack(pady=10)
 
     # Return button to go back to the dashboard
-    tb.Button(user_frame, text="Return", command=show_dashboard, bootstyle="secondary-outline").pack(pady=10)
+    tb.Button(
+        user_frame,
+        text="Return",
+        command=show_dashboard,
+        bootstyle="secondary-outline"
+    ).pack(pady=10)
+
+def remove_user(user_id):
+    """
+    Deletes a user from the 'users' table using the user's numeric ID.
+    
+    :param user_id: The auto-incremented ID of the user to be removed.
+    """
+    try:
+        conn = sqlite3.connect('users.db')
+        cursor = conn.cursor()
+        
+        # Delete the user by user_id
+        cursor.execute("DELETE FROM users WHERE user_id = ?", (user_id,))
+        conn.commit()
+        conn.close()
+
+        # Optionally, refresh or return to the dashboard after removal
+        show_dashboard()
+
+    except Exception as e:
+        messagebox.showerror("Error", f"Failed to remove user with ID {user_id}. Details: {e}")
+
 
 def remove_selected_user(table):
+    # Get the selected row; each row is a tuple of (user_id, first_name, last_name, email)
     selected = table.get_selected()
     if selected:
-        user_email = selected[0][2]  # Email is in the 3rd column
-        remove_user(user_email)  # Call the remove_user function to delete the user
-        messagebox.showinfo("Success", f"User {user_email} has been removed.")
+        # user_id is in the first column (index 0) after the update
+        selected_user_id = selected[0][0]
+        remove_user(selected_user_id)  # Updated remove_user to accept user_id
+        messagebox.showinfo("Success", f"User with ID {selected_user_id} has been removed.")
     else:
         messagebox.showerror("Error", "No user selected.")
+
+
+def manage_key_requests_window():
+    req_win = tk.Toplevel()
+    req_win.title("Key Requests")
+
+    tree = ttk.Treeview(req_win, columns=("ReqID","UserID","File","Reason","Status","Time"), show="headings")
+    tree.heading("ReqID", text="Request ID")
+    tree.heading("UserID", text="User ID")
+    tree.heading("File", text="File Name")
+    tree.heading("Reason", text="Reason")
+    tree.heading("Status", text="Status")
+    tree.heading("Time", text="Request Time")
+    tree.pack(fill="both", expand=True)
+
+    def refresh_requests():
+        tree.delete(*tree.get_children())
+        conn = sqlite3.connect("ooredoo.db")
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT request_id, user_id, file_name, request_reason, status, request_timestamp
+            FROM key_requests
+            WHERE status='PENDING'
+        """)
+        rows = cursor.fetchall()
+        conn.close()
+        for row in rows:
+            tree.insert("", tk.END, values=row)
+
+    def approve_request():
+        selected = tree.selection()
+        if not selected:
+            return
+        values = tree.item(selected[0])["values"]
+        request_id = values[0]
+
+        conn = sqlite3.connect("ooredoo.db")
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE key_requests
+            SET status='APPROVED', admin_id=?, approval_timestamp=datetime('now')
+            WHERE request_id=?
+        """, (current_admin_id, request_id))  # admin_id is the logged-in admin
+        conn.commit()
+        conn.close()
+
+        messagebox.showinfo("Info", f"Request {request_id} approved.")
+        refresh_requests()
+
+    def reject_request():
+        selected = tree.selection()
+        if not selected:
+            return
+        values = tree.item(selected[0])["values"]
+        request_id = values[0]
+
+        conn = sqlite3.connect("ooredoo.db")
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE key_requests
+            SET status='REJECTED', admin_id=?, approval_timestamp=datetime('now')
+            WHERE request_id=?
+        """, (current_admin_id, request_id))
+        conn.commit()
+        conn.close()
+
+        messagebox.showinfo("Info", f"Request {request_id} rejected.")
+        refresh_requests()
+
+    btn_frame = tk.Frame(req_win)
+    btn_frame.pack(pady=5)
+    approve_btn = tk.Button(btn_frame, text="Approve", command=approve_request)
+    reject_btn = tk.Button(btn_frame, text="Reject", command=reject_request)
+    approve_btn.grid(row=0, column=0, padx=5)
+    reject_btn.grid(row=0, column=1, padx=5)
+     # Add a "Return" button
+    def return_to_dashboard():
+        req_win.destroy()  # Close the current window
+        show_dashboard()   # Redirect to the admin dashboard
+
+    return_btn = tk.Button(
+        req_win,
+        text="Return",
+        command=return_to_dashboard
+    )
+    return_btn.pack(pady=10)
+    
+    refresh_requests()
 
 
 def show_dashboard():
     global current_user_department, last_page
 
+    # Check if the logged-in user is admin
     if current_user_department != 'Admin':
         messagebox.showerror("Access Denied", "Only admins can access the dashboard.")
         return
@@ -623,31 +1031,51 @@ def show_dashboard():
     dashboard_frame.pack(fill="both", expand=True)
 
     # Title for the dashboard
-    tb.Label(dashboard_frame, text="Admin Dashboard - File Activities", bootstyle="info", font=("Arial", 18, "bold")).pack(pady=10)
+    tb.Label(
+        dashboard_frame, 
+        text="Admin Dashboard - File Activities", 
+        bootstyle="info", 
+        font=("Arial", 18, "bold")
+    ).pack(pady=10)
 
     try:
         # Fetch file activities from the database
         conn = sqlite3.connect('app_data.db')
         cursor = conn.cursor()
+        # Now also select user_id from file_activities if it exists
         cursor.execute("""
-            SELECT user_email, department, filename, file_size, timestamp, key_used, activity_type
+            SELECT 
+                user_id, 
+                user_email, 
+                department, 
+                filename, 
+                file_size, 
+                timestamp, 
+                activity_type,
+                key 
+                
             FROM file_activities
         """)
         file_activities = cursor.fetchall()
 
-        # Process keys to obfuscate them for security
-        file_activities = [
-            (
+        # Process keys to obfuscate them for security (show only last 4 chars if length >= 4)
+        # We'll also keep user_id in the row data so we can display it
+        processed_activities = []
+        for uid, email, dept, fname, fsize, ts,  activity,key in file_activities:
+            if key and len(key) >= 4:
+                obfuscated_key = f"******{key[-4:]}"
+            else:
+                obfuscated_key = "N/A"
+            processed_activities.append((
+                uid,
                 email,
                 dept,
                 fname,
                 fsize,
-                timestamp,
-                f"******{key[-4:]}" if key and len(key) >= 4 else "N/A",
-                activity
-            )
-            for email, dept, fname, fsize, timestamp, key, activity in file_activities
-        ]
+                ts,
+                activity,
+                obfuscated_key,
+            ))
 
     except Exception as e:
         messagebox.showerror("Database Error", f"Failed to fetch file activities: {e}")
@@ -656,14 +1084,24 @@ def show_dashboard():
         if conn:
             conn.close()
 
-    # Table Columns
-    columns = ('User Email', 'Department', 'File Name', 'File Size (Bytes)', 'Timestamp', 'Key Used', 'Activity Type')
+    # Table Columns (now includes 'User ID')
+    columns = (
+        'User ID', 
+        'User Email', 
+        'Department', 
+        'File Name', 
+        'File Size (Bytes)', 
+        'Timestamp', 
+        
+        'Activity Type',
+        'Key'
+    )
 
     # Create TableView
     file_table = Tableview(
         master=dashboard_frame,
         coldata=columns,
-        rowdata=file_activities,
+        rowdata=processed_activities,
         paginated=True,
         searchable=True,
         bootstyle="success"
@@ -671,7 +1109,12 @@ def show_dashboard():
     file_table.pack(pady=10, fill='both', expand=True)
 
     # View All Users button
-    tb.Button(dashboard_frame, text="View All Users", command=view_all_users, bootstyle="secondary-outline").pack(pady=10)
+    tb.Button(
+        dashboard_frame, 
+        text="View All Users", 
+        command=view_all_users, 
+        bootstyle="secondary-outline"
+    ).pack(pady=10)
 
     # Key Management button
     tb.Button(
@@ -680,6 +1123,10 @@ def show_dashboard():
         command=open_key_management_window,
         bootstyle="warning-outline"
     ).pack(pady=10)
+
+    # Manage Key Requests button (admin feature)
+    manage_requests_button = tk.Button(dashboard_frame, text="Manage Key Requests", command=manage_key_requests_window)
+    manage_requests_button.pack(pady=10)
 
     # Dynamic Return button
     def navigate_back():
@@ -696,24 +1143,13 @@ def show_dashboard():
     ).pack(pady=10)
 
 
-# Fetch all users from SQLite
+# Fetch all users from SQLite (unchanged, except your final code might include user_id as well)
 def get_all_users():
     conn = sqlite3.connect('users.db')
     cursor = conn.cursor()
     cursor.execute("SELECT first_name, last_name, email FROM users")
     users = cursor.fetchall()
-    conn.close()
-    return [{'first_name': user[0], 'last_name': user[1], 'email': user[2]} for user in users]
 
-
-# Remove user
-def remove_user(email):
-    conn = sqlite3.connect('users.db')
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM users WHERE email = ?", (email,))
-    conn.commit()
-    conn.close()
-    show_dashboard()
 
 # Call init_db() when the app starts to ensure the database is ready
 init_db()
@@ -725,30 +1161,36 @@ def create_main_page(is_encryption=True):
     # Set last_page based on the current mode
     last_page = "encryption" if is_encryption else "decryption"
 
+    # Clear previous widgets
     for widget in root.winfo_children():
         widget.destroy()
 
+    # Create the main frame
     main_frame = tb.Frame(root, padding=(20, 10), bootstyle="white")
     main_frame.pack(fill="both", expand=True)
 
+    # Add the app logo
     add_logo(main_frame)
 
-    # Change button text and function based on whether encryption or decryption was selected
+    # Buttons for encryption mode
     if is_encryption:
         tb.Button(main_frame, text="Upload Excel File", command=upload_file, style="SmallRedButton.TButton").pack(pady=10)
-        tb.Button(main_frame, text="Encrypt Data", command=encrypt_data, style="SmallRedButton.TButton").pack(pady=10)
-        tb.Button(main_frame, text="Simulate Cloud Upload", command=simulate_upload, style="SmallRedButton.TButton").pack(pady=10)   
+        
+        tb.Button(main_frame, text="Simulate Cloud Upload", command=simulate_upload, style="SmallRedButton.TButton").pack(pady=10)
+        tb.Button(main_frame,text="Encrypt Sensitive Data in Documents",command=open_document_encryption_tool,style="SmallRedButton.TButton").pack(pady=10)
+
     else:
-        tb.Button(main_frame, text="Simulate Cloud download", command=simulate_upload, style="SmallRedButton.TButton").pack(pady=10)
+        # Buttons for decryption mode
+        tb.Button(main_frame, text="Simulate Cloud Download", command=simulate_upload, style="SmallRedButton.TButton").pack(pady=10)
+        tb.Button(main_frame, text="Request Data Access", command=lambda: request_access_window(current_user_id), style="SmallRedButton.TButton").pack(pady=10)
         tb.Button(main_frame, text="Upload Excel File", command=upload_file, style="SmallRedButton.TButton").pack(pady=10)
         tb.Button(main_frame, text="Decrypt Data", command=decrypt_data, style="SmallRedButton.TButton").pack(pady=10)
 
+    # Add Admin Dashboard button for admins
     if current_user_department == 'Admin':
         tb.Button(main_frame, text="Admin Dashboard", command=show_dashboard, style="SmallRedButton.TButton").pack(pady=10)
-    else:
-        request_key_button = tk.Button(root, text="Request Data Access", command=lambda: request_access_window(current_user_id))
-        request_key_button.pack(pady=10)
 
+    # Add Sign Out button
     tb.Button(main_frame, text="Sign Out", command=create_signin_page, bootstyle="danger-outline").pack(side="top", anchor="nw", padx=10, pady=10)
 
 def create_signup_page():
@@ -911,37 +1353,49 @@ def create_signin_page():
     # Sign-up button
     tb.Button(signin_frame, text="Sign Up", command=create_signup_page, style="SmallRedButton.TButton").pack(pady=5)
 
+# Global variables at module-level
+current_user_id = None
+current_admin_id = None
+current_user_department = None
+current_user_email = None
+
 
 def submit_signin():
-    # Retrieve email and password from the entry fields
-    email = entry_email.get()
-    password = entry_password.get()
+    global current_user_id, current_admin_id, current_user_department, current_user_email
 
-    # Hash the entered password
+    email = entry_email.get().strip()
+    password = entry_password.get().strip()
     hashed_password = hash_password(password)
 
-    # Connect to the database
     conn = sqlite3.connect('users.db')
     cursor = conn.cursor()
-
-    # Query for the user's credentials
-    cursor.execute('SELECT password, department FROM users WHERE email = ?', (email,))
+    cursor.execute('SELECT user_id, password, department FROM users WHERE email = ?', (email,))
     result = cursor.fetchone()
+    conn.close()
 
-    # If credentials are valid, store global variables and go to the operation choice page
-    if result and result[0] == hashed_password:
-        global current_user_email, current_user_department
-        current_user_email = email  # Store the signed-in user's email globally
-        current_user_department = result[1]  # Store the department
-
-        messagebox.showinfo("Success", "Sign-in successful!")
-
-        # Navigate to the operation choice page (choose between encryption or decryption)
-        create_operation_choice_page()  # This function will be implemented to choose between operations
+    if result:
+        db_user_id, db_password, db_department = result
+        if db_password == hashed_password:
+            if db_department.lower() == 'admin':
+                current_admin_id = db_user_id
+                current_user_id = db_user_id
+                current_user_department = db_department
+                current_user_email = email
+                messagebox.showinfo("Success", "Admin login successful!")
+            else:
+                current_user_id = db_user_id
+                current_user_department = db_department
+                current_user_email = email
+                messagebox.showinfo("Success", "Sign-in successful!")
+            
+            create_operation_choice_page()  # proceed to next screen
+        else:
+            messagebox.showerror("Error", "Invalid email or password.")
     else:
         messagebox.showerror("Error", "Invalid email or password.")
 
-    conn.close()
+
+
 
 # Function to navigate to the operation choice page
 def create_operation_choice_page():
@@ -965,10 +1419,7 @@ create_signin_page()
 
 
 
-# Create the user table when the app starts
-# Initialize the app and create necessary tables
-create_user_table()
-create_file_activity_table()
+
 
 # Start with the sign-in page
 create_signin_page()
