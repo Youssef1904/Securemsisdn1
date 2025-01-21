@@ -153,6 +153,8 @@ def load_rsa_keys():
 
 
 
+
+
 AES_KEY_SIZE = 32  # 256-bit AES keys
 
 # Generate new RSA key pair
@@ -337,6 +339,11 @@ def init_db():
 
 
 def open_file(filename):
+    print(f"Debug: file_path just before use: {file_path}")
+    print(f"Type: {type(file_path)}")
+    if isinstance(file_path, bytes):
+        print(f"Bytes content: {file_path[:100]}")
+    
     file_path = os.path.join(os.getcwd(), filename)
     
     try:
@@ -408,14 +415,12 @@ def log_file_activity(user_id, user_email, department, filename, file_size, key,
 
 
 
-# Function to handle file upload
-def upload_file():
-    global file_path
-    file_path = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx")])
-    if file_path:
-        messagebox.showinfo("File Selected", f"File selected: {file_path}")
+
 
 def open_document_encryption_tool():
+    """
+    Opens a tool for processing Word or Excel documents for encryption.
+    """
     tool_window = tk.Toplevel()
     tool_window.title("Document Encryption Tool")
     tool_window.geometry("800x600")
@@ -423,34 +428,73 @@ def open_document_encryption_tool():
     tk.Label(tool_window, text="Upload a Word or Excel file:", font=("Arial", 12)).pack(pady=10)
     file_path_var = tk.StringVar()
 
-    def upload_document():
-        file_path = filedialog.askopenfilename(
-            filetypes=[("Word and Excel Files", "*.docx *.xlsx"), ("Word Documents", "*.docx"), ("Excel Files", "*.xlsx")]
-        )
-        if file_path:
-            file_path_var.set(file_path)
-            process_document(file_path)
-
-    tk.Button(tool_window, text="Upload Document", command=upload_document).pack(pady=10)
-    tk.Entry(tool_window, textvariable=file_path_var, state="readonly", width=60).pack(pady=5)
-
+    # Frame to display content
     content_frame = tk.Frame(tool_window)
     content_frame.pack(fill="both", expand=True, padx=10, pady=10)
 
     def process_document(file_path):
-        # Clear the content_frame
-        for widget in content_frame.winfo_children():
-            widget.destroy()
+        """
+        Processes the uploaded document and displays its content.
+        """
+        # Debug: Inspect the file path or bytes content
+        print(f"File path received: {file_path}")
+        print(f"Type of file_path: {type(file_path)}")
+        if isinstance(file_path, bytes):
+            print(f"Bytes content (first 100 bytes): {file_path[:100]}")
+            if not file_path.startswith(b"PK"):  # Check if bytes start with "PK"
+                raise ValueError("Invalid Excel file content. File is not a valid .xlsx file.")
 
-        # Check file extension and process accordingly
-        if file_path.endswith(".xlsx"):
-            display_excel_content(file_path, content_frame)
-        elif file_path.endswith(".docx"):
-            display_word_content(file_path, content_frame)
-        else:
-            messagebox.showerror("Error", "Unsupported file type. Please upload a .docx or .xlsx file.")
+        # Process the file based on its extension
+        try:
+            if file_path.endswith(".xlsx"):
+                display_excel_content(file_path, content_frame)
+            elif file_path.endswith(".docx"):
+                display_word_content(file_path, content_frame)
+            else:
+                raise ValueError("Unsupported file type. Please upload a .docx or .xlsx file.")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to process the file: {e}")
 
-    tk.Button(tool_window, text="Return", command=tool_window.destroy).pack(pady=10)
+    
+    def upload_document():
+        """
+        Handles document upload and reads the file content.
+        """
+        
+
+        file_path = filedialog.askopenfilename(
+            title="Select a Word or Excel File",
+            filetypes=[("Word and Excel Files", "*.docx *.xlsx"), ("Word Documents", "*.docx"), ("Excel Files", "*.xlsx")]
+        )
+
+        if file_path:
+            # Debug: Inspect the file path
+            print(f"Selected file path: {file_path}")
+
+            # Open the file in binary mode and read its content
+            try:
+                with open(file_path, "rb") as f:
+                    file_content = f.read()  # Read the file content as bytes
+
+                # Debug: Inspect the first few bytes of the file content
+                print(f"File content (first 100 bytes): {file_content[:100]}")
+                if not file_content.startswith(b"PK"):  # Validate the file is an Excel ZIP archive
+                    raise ValueError("Invalid Excel file content. File is not a valid .xlsx file.")
+
+                # Pass the bytes content to process_document
+                process_document(file_path)
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to read the file: {e}")
+
+
+    
+
+    tk.Button(tool_window, text="Upload Document", command=upload_document, font=("Arial", 10)).pack(pady=10)
+    tk.Entry(tool_window, textvariable=file_path_var, state="readonly", width=60).pack(pady=5)
+
+    tk.Button(tool_window, text="Return", command=tool_window.destroy, font=("Arial", 10)).pack(pady=10)
+
+
 
 def display_excel_content(file_path, parent_frame):
     import pandas as pd
@@ -460,7 +504,7 @@ def display_excel_content(file_path, parent_frame):
         df = pd.read_excel(file_path)
 
         # Treeview for data preview (enable cell selection)
-        tree = ttk.Treeview(parent_frame, selectmode="none")
+        tree = ttk.Treeview(parent_frame, selectmode="extended")  # Allow multiple selection
         tree.pack(side="left", fill="both", expand=True)
 
         # Scrollbar for Treeview
@@ -550,6 +594,11 @@ def display_excel_content(file_path, parent_frame):
                                 f"Failed to encrypt cell at Row {row_index + 1}, Column '{col_name}': {encryption_error}"
                             )
 
+                print(f"Debug: file_path just before use: {file_path}")
+                print(f"Type: {type(file_path)}")
+                if isinstance(file_path, bytes):
+                    print(f"Bytes content: {file_path[:100]}")
+
                 # Save the updated file
                 updated_file_path = filedialog.asksaveasfilename(
                     defaultextension=".xlsx",
@@ -562,6 +611,11 @@ def display_excel_content(file_path, parent_frame):
 
                 # Save the DataFrame to the specified file path
                 df.to_excel(updated_file_path, index=False)
+
+                print(f"Debug: file_path just before use: {file_path}")
+                print(f"Type: {type(file_path)}")
+                if isinstance(file_path, bytes):
+                    print(f"Bytes content: {file_path[:100]}")
 
                 # Save the AES key as a separate file
                 aes_key_file_path = os.path.splitext(updated_file_path)[0] + "_aes_key.bin"
@@ -640,13 +694,24 @@ def encrypt_selected_text(text_widget, file_path):
     doc = Document(file_path)
     for para in doc.paragraphs:
         para.text = para.text.replace(selected_text, encrypted_text)
+    print(f"Debug: file_path just before use: {file_path}")
+    print(f"Type: {type(file_path)}")
+    if isinstance(file_path, bytes):
+        print(f"Bytes content: {file_path[:100]}")
 
     updated_file_path = filedialog.asksaveasfilename(defaultextension=".docx", filetypes=[("Word documents", "*.docx")])
     if updated_file_path:
         doc.save(updated_file_path)
         messagebox.showinfo("Success", f"Encrypted Word file saved at {updated_file_path}")
 
+import zipfile
 
+file_path = "invalid_bytes_output.xlsx"
+extract_to = "invalid_bytes_extracted"
+
+with zipfile.ZipFile(file_path, 'r') as zip_ref:
+    zip_ref.extractall(extract_to)
+    print(f"Contents extracted to {extract_to}")
 from io import BytesIO
 import pandas as pd
 
@@ -659,17 +724,62 @@ def read_excel_safely(file_path):
 
     Returns:
         DataFrame: The loaded DataFrame.
+
+    Raises:
+        ValueError: If the file is invalid or cannot be read.
     """
     try:
+        # Debug: Log the type of file_path
+        print(f"File path received: {file_path}")
+        print(f"Type of file_path: {type(file_path)}")
+
+        # Handle bytes input
         if isinstance(file_path, bytes):
-            # If file_path is bytes, treat it as in-memory Excel data
             print("Detected bytes input. Processing as BytesIO.")
+            
+            # Validate that bytes start with "PK" (indicating a ZIP/Excel file)
+            if not file_path.startswith(b"PK"):
+                raise ValueError("Invalid Excel file content. File is not a valid .xlsx file.")
+            
+            # Convert bytes to a BytesIO stream
             file_path = BytesIO(file_path)
 
-        # Load the Excel file with the appropriate engine
-        return pd.read_excel(file_path, engine='openpyxl')
+        # Handle string input
+        elif isinstance(file_path, str):
+            print(f"File path: {file_path}")
+            
+            # Validate file extension
+            if not file_path.endswith(('.xlsx', '.xls')):
+                raise ValueError("Invalid file format. Only .xlsx and .xls files are supported.")
+
+        # Attempt to read the file using pandas
+        print("Attempting to read the Excel file...")
+        df = pd.read_excel(file_path, engine='openpyxl')  # Use 'openpyxl' for modern Excel files
+
+        print("Excel file read successfully.")
+        return df
+
+    except ValueError as ve:
+        # Raise validation-specific errors
+        print(f"Validation Error: {ve}")
+        raise ValueError(f"Validation Error: {ve}")
     except Exception as e:
+        # Catch other exceptions and raise with debug info
+        print(f"Debug: Failed to read the Excel file: {e}")
         raise ValueError(f"Failed to read the Excel file: {e}")
+
+
+def validate_file_path(file_path):
+    if isinstance(file_path, bytes):
+        if not file_path.startswith(b"PK"):
+            raise ValueError("Invalid bytes input. Does not represent a valid .xlsx file.")
+    elif isinstance(file_path, str):
+        if not file_path.endswith('.xlsx'):
+            raise ValueError("Invalid file format. Only .xlsx files are allowed.")
+    else:
+        raise ValueError("Invalid file_path type. Must be str or bytes.")
+
+
 
 
 
@@ -687,20 +797,55 @@ def encrypt_data(selected_cells, file_path):
     Returns:
         None: Saves the encrypted file and AES key to disk.
     """
+    validate_file_path(file_path)
+
     try:
         if not selected_cells:
             messagebox.showerror("Error", "No cells selected for encryption.")
             return
-        # Debug: Check the input file
+
+        # Debug: Inspect file_path
         print(f"File path received: {file_path}")
         print(f"Type of file_path: {type(file_path)}")
-        # Safely read the Excel file
-       
 
+        # Handle bytes input
+        if isinstance(file_path, bytes):
+            print(f"Bytes content (first 100 bytes): {file_path[:100]}")
+            if not file_path.startswith(b"PK"):
+                with open("invalid_bytes_output.xlsx", "wb") as f:
+                    f.write(file_path)
+                raise ValueError("Invalid Excel file content. File saved to 'invalid_bytes_output.xlsx' for inspection.")
+            file_path = BytesIO(file_path)
+
+        # Handle string input
+        elif isinstance(file_path, str):
+            print(f"File path: {file_path}")
+            if not file_path.endswith(('.xlsx', '.xls')):
+                raise ValueError("Invalid file format. Only .xlsx and .xls files are supported.")
+
+        # Safely read the Excel file
         df = read_excel_safely(file_path)
+        print("DataFrame loaded successfully:")
+        print(df.head())
+
+        # Encryption logic follows here...
+
+    except ValueError as e:
+        messagebox.showerror("Error", f"Validation Error: {e}")
+        print(f"Debug: {e}")
+    except Exception as e:
+        messagebox.showerror("Error", f"Encryption failed: {e}")
+        print(f"Debug: {e}")
+
 
         # Load RSA public key
-        public_key, _ = load_rsa_keys()  # Ensure this function is defined elsewhere
+        try:
+            keys = load_rsa_keys()  # Ensure this function is defined elsewhere
+            if not isinstance(keys, tuple) or len(keys) != 2:
+                raise ValueError("load_rsa_keys must return a tuple (public_key, private_key).")
+            public_key, _ = keys
+        except Exception as e:
+            raise ValueError(f"Error loading RSA keys: {e}")
 
         # Generate AES key
         aes_key = get_random_bytes(16)
@@ -725,8 +870,15 @@ def encrypt_data(selected_cells, file_path):
 
         # Encrypt the selected cells
         for row_index, col_name in selected_cells:
+            if col_name not in df.columns:
+                raise ValueError(f"Column '{col_name}' not found in the Excel file.")
             value = df.at[row_index, col_name]  # Get the cell value
             df.at[row_index, col_name] = encrypt_cell(value, aes_key)  # Encrypt and update the value
+
+        print(f"Debug: file_path just before use: {file_path}")
+        print(f"Type: {type(file_path)}")
+        if isinstance(file_path, bytes):
+            print(f"Bytes content: {file_path[:100]}")
 
         # Save the updated file
         encrypted_file_path = filedialog.asksaveasfilename(
@@ -757,10 +909,14 @@ def encrypt_data(selected_cells, file_path):
             key=base64.b64encode(aes_key).decode('utf-8')
         )
 
+    
     except ValueError as e:
-        messagebox.showerror("Error", f"Invalid file format: {e}")
+        messagebox.showerror("Error", f"Validation Error: {e}")
+        print(f"Debug: {e}")
     except Exception as e:
         messagebox.showerror("Error", f"Encryption failed: {e}")
+        print(f"Debug: {e}")
+
 
 
 
@@ -1216,16 +1372,16 @@ def create_main_page(is_encryption=True):
 
     # Buttons for encryption mode
     if is_encryption:
-        tb.Button(main_frame, text="Upload Excel File", command=upload_file, style="SmallRedButton.TButton").pack(pady=10)
         
-        tb.Button(main_frame, text="Simulate Cloud Upload", command=simulate_upload, style="SmallRedButton.TButton").pack(pady=10)
         tb.Button(main_frame,text="Encrypt Sensitive Data in Documents",command=open_document_encryption_tool,style="SmallRedButton.TButton").pack(pady=10)
+        tb.Button(main_frame, text="Simulate Cloud Upload", command=simulate_upload, style="SmallRedButton.TButton").pack(pady=10)
+        
 
     else:
         # Buttons for decryption mode
         tb.Button(main_frame, text="Simulate Cloud Download", command=simulate_upload, style="SmallRedButton.TButton").pack(pady=10)
         tb.Button(main_frame, text="Request Data Access", command=lambda: request_access_window(current_user_id), style="SmallRedButton.TButton").pack(pady=10)
-        tb.Button(main_frame, text="Upload Excel File", command=upload_file, style="SmallRedButton.TButton").pack(pady=10)
+        'tb.Button(main_frame, text="Upload Excel File", command=upload_file, style="SmallRedButton.TButton").pack(pady=10)'
         tb.Button(main_frame, text="Decrypt Data", command=decrypt_data, style="SmallRedButton.TButton").pack(pady=10)
 
     # Add Admin Dashboard button for admins

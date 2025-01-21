@@ -31,8 +31,7 @@ def request_access_window(current_user_id):
             # Convert the full path to just the base file name
             base_name = os.path.basename(full_file_path)
 
-            # Debug print to see what's being inserted
-            print(f"Debug: current_user_id={current_user_id}, file_name={base_name}, reason={reason}")
+            
 
             conn = sqlite3.connect("ooredoo.db")
             cursor = conn.cursor()
