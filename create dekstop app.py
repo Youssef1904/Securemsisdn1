@@ -338,14 +338,12 @@ def init_db():
 
 
 
-def open_file(filename):
+def open_file(file_path):
     print(f"Debug: file_path just before use: {file_path}")
     print(f"Type: {type(file_path)}")
     if isinstance(file_path, bytes):
         print(f"Bytes content: {file_path[:100]}")
-    
-    file_path = os.path.join(os.getcwd(), filename)
-    
+
     try:
         if platform.system() == 'Windows':
             os.startfile(file_path)
@@ -355,6 +353,7 @@ def open_file(filename):
             subprocess.call(('xdg-open', file_path))
     except Exception as e:
         messagebox.showerror("Error", f"Unable to open file: {e}")
+
         
 
 
@@ -500,8 +499,8 @@ def display_excel_content(file_path, parent_frame):
     import pandas as pd
 
     try:
-        # Load Excel data
-        df = pd.read_excel(file_path)
+        # Load Excel data safely
+        df = read_excel_safely(file_path)
 
         # Treeview for data preview (enable cell selection)
         tree = ttk.Treeview(parent_frame, selectmode="extended")  # Allow multiple selection
@@ -537,32 +536,24 @@ def display_excel_content(file_path, parent_frame):
 
         # Function to handle cell selection
         def on_cell_click(event):
-            # Identify the row and column of the clicked cell
             region = tree.identify("region", event.x, event.y)
             if region == "cell":
-                row_id = tree.identify_row(event.y)  # Get row ID
-                col_id = tree.identify_column(event.x)  # Get column ID (e.g., '#1')
+                row_id = tree.identify_row(event.y)
+                col_id = tree.identify_column(event.x)
 
-                # Get actual column name
                 col_index = int(col_id.strip("#")) - 1
                 col_name = df.columns[col_index]
-
-                # Get cell value
                 row_index = tree.index(row_id)
-                cell_value = df.iloc[row_index, col_index]
 
-                # Toggle selection
                 cell = (row_index, col_name)
                 if cell in selected_cells:
-                    selected_cells.remove(cell)  # Deselect if already selected
-                    # Remove from Listbox
+                    selected_cells.remove(cell)
                     for i, item in enumerate(selected_listbox.get(0, tk.END)):
                         if item == f"Row {row_index + 1}, Column '{col_name}'":
                             selected_listbox.delete(i)
                             break
                 else:
-                    selected_cells.append(cell)  # Add to selection
-                    # Add to Listbox
+                    selected_cells.append(cell)
                     selected_listbox.insert(tk.END, f"Row {row_index + 1}, Column '{col_name}'")
 
         # Bind click event
@@ -570,36 +561,25 @@ def display_excel_content(file_path, parent_frame):
 
         # Add encryption button
         def encrypt_selected_cells():
-            """
-            Encrypts the user-selected cells in the Excel file.
-            """
             if not selected_cells:
                 messagebox.showerror("Error", "No cells selected for encryption.")
                 return
 
             try:
-                # Generate an AES key (replace with secure key management if required)
-                aes_key = os.urandom(16)
+                aes_key = os.urandom(16)  # Generate AES key
 
-                # Encrypt the selected cells
                 for row_index, col_name in selected_cells:
-                    value = df.at[row_index, col_name]  # Get the cell value
-                    if pd.notna(value):  # Only encrypt non-NaN values
+                    value = df.at[row_index, col_name]
+                    if pd.notna(value):
                         try:
-                            encrypted_value = encrypt_data(str(value), aes_key)  # Encrypt the cell value
-                            df.at[row_index, col_name] = encrypted_value  # Update the DataFrame
-                        except Exception as encryption_error:
+                            encrypted_value = encrypt_data(str(value), aes_key)
+                            df.at[row_index, col_name] = encrypted_value
+                        except Exception as e:
                             messagebox.showwarning(
                                 "Encryption Warning",
-                                f"Failed to encrypt cell at Row {row_index + 1}, Column '{col_name}': {encryption_error}"
+                                f"Failed to encrypt cell at Row {row_index + 1}, Column '{col_name}': {e}"
                             )
 
-                print(f"Debug: file_path just before use: {file_path}")
-                print(f"Type: {type(file_path)}")
-                if isinstance(file_path, bytes):
-                    print(f"Bytes content: {file_path[:100]}")
-
-                # Save the updated file
                 updated_file_path = filedialog.asksaveasfilename(
                     defaultextension=".xlsx",
                     filetypes=[("Excel files", "*.xlsx")],
@@ -609,26 +589,16 @@ def display_excel_content(file_path, parent_frame):
                     messagebox.showerror("Error", "File save operation was canceled.")
                     return
 
-                # Save the DataFrame to the specified file path
                 df.to_excel(updated_file_path, index=False)
-
-                print(f"Debug: file_path just before use: {file_path}")
-                print(f"Type: {type(file_path)}")
-                if isinstance(file_path, bytes):
-                    print(f"Bytes content: {file_path[:100]}")
-
-                # Save the AES key as a separate file
                 aes_key_file_path = os.path.splitext(updated_file_path)[0] + "_aes_key.bin"
                 with open(aes_key_file_path, "wb") as aes_file:
                     aes_file.write(aes_key)
 
-                # Show success message
                 messagebox.showinfo(
                     "Success",
                     f"Encrypted Excel file saved to:\n{updated_file_path}\nAES key saved to:\n{aes_key_file_path}"
                 )
 
-                # Log the activity (if a logging function exists)
                 log_file_activity(
                     user_id=current_user_id,
                     user_email=current_user_email,
@@ -641,6 +611,11 @@ def display_excel_content(file_path, parent_frame):
 
             except Exception as e:
                 messagebox.showerror("Error", f"Encryption failed: {e}")
+
+        tk.Button(parent_frame, text="Encrypt Selected Cells", command=encrypt_selected_cells).pack(pady=10)
+
+    except Exception as e:
+        messagebox.showerror("Error", f"Failed to display Excel content: {e}")
 
 
 
@@ -681,37 +656,49 @@ def encrypt_selected_text(text_widget, file_path):
     from docx import Document
     from cryptography.fernet import Fernet
 
-    selected_text = text_widget.selection_get()
-    if not selected_text:
-        messagebox.showerror("Error", "Please highlight text to encrypt.")
-        return
+    try:
+        # Validate file_path
+        if not isinstance(file_path, str) or not file_path.endswith(".docx"):
+            raise ValueError("Invalid file_path. Expected a valid .docx file.")
+        
+        print(f"Debug: file_path before processing: {file_path}, Type: {type(file_path)}")
 
-    key = Fernet.generate_key()
-    cipher = Fernet(key)
-    encrypted_text = cipher.encrypt(selected_text.encode()).decode()
+        # Get selected text from the text widget
+        selected_text = text_widget.selection_get()
+        if not selected_text.strip():
+            messagebox.showerror("Error", "Please highlight text to encrypt.")
+            return
 
-    # Modify the Word file (or a copy)
-    doc = Document(file_path)
-    for para in doc.paragraphs:
-        para.text = para.text.replace(selected_text, encrypted_text)
-    print(f"Debug: file_path just before use: {file_path}")
-    print(f"Type: {type(file_path)}")
-    if isinstance(file_path, bytes):
-        print(f"Bytes content: {file_path[:100]}")
+        # Generate encryption key and encrypt selected text
+        key = Fernet.generate_key()
+        cipher = Fernet(key)
+        encrypted_text = cipher.encrypt(selected_text.encode()).decode()
 
-    updated_file_path = filedialog.asksaveasfilename(defaultextension=".docx", filetypes=[("Word documents", "*.docx")])
-    if updated_file_path:
-        doc.save(updated_file_path)
-        messagebox.showinfo("Success", f"Encrypted Word file saved at {updated_file_path}")
+        # Modify the Word file
+        doc = Document(file_path)
+        for para in doc.paragraphs:
+            para.text = para.text.replace(selected_text, encrypted_text)
 
-import zipfile
+        # Save the modified Word file
+        updated_file_path = filedialog.asksaveasfilename(
+            defaultextension=".docx",
+            filetypes=[("Word documents", "*.docx")],
+            title="Save Encrypted Word File"
+        )
+        if updated_file_path:
+            doc.save(updated_file_path)
+            messagebox.showinfo("Success", f"Encrypted Word file saved at {updated_file_path}")
+            print(f"Encrypted file saved at: {updated_file_path}")
 
-file_path = "invalid_bytes_output.xlsx"
-extract_to = "invalid_bytes_extracted"
+    except ValueError as ve:
+        messagebox.showerror("Error", f"Validation error: {ve}")
+        print(f"Debug: {ve}")
 
-with zipfile.ZipFile(file_path, 'r') as zip_ref:
-    zip_ref.extractall(extract_to)
-    print(f"Contents extracted to {extract_to}")
+    except Exception as e:
+        messagebox.showerror("Error", f"An error occurred: {e}")
+        print(f"Debug: {e}")
+
+
 from io import BytesIO
 import pandas as pd
 
@@ -720,64 +707,40 @@ def read_excel_safely(file_path):
     Safely reads an Excel file, handling both string paths and bytes objects.
 
     Parameters:
-        file_path (str or bytes): Path to the Excel file or a bytes object.
+        file_path (str or BytesIO): Path to the Excel file or a BytesIO object.
 
     Returns:
         DataFrame: The loaded DataFrame.
-
-    Raises:
-        ValueError: If the file is invalid or cannot be read.
     """
     try:
-        # Debug: Log the type of file_path
-        print(f"File path received: {file_path}")
-        print(f"Type of file_path: {type(file_path)}")
-
-        # Handle bytes input
-        if isinstance(file_path, bytes):
-            print("Detected bytes input. Processing as BytesIO.")
-            
-            # Validate that bytes start with "PK" (indicating a ZIP/Excel file)
-            if not file_path.startswith(b"PK"):
-                raise ValueError("Invalid Excel file content. File is not a valid .xlsx file.")
-            
-            # Convert bytes to a BytesIO stream
-            file_path = BytesIO(file_path)
-
-        # Handle string input
+        if isinstance(file_path, BytesIO):
+            print("Debug: Processing BytesIO input.")
+            return pd.read_excel(file_path, engine='openpyxl')
         elif isinstance(file_path, str):
-            print(f"File path: {file_path}")
-            
-            # Validate file extension
-            if not file_path.endswith(('.xlsx', '.xls')):
-                raise ValueError("Invalid file format. Only .xlsx and .xls files are supported.")
-
-        # Attempt to read the file using pandas
-        print("Attempting to read the Excel file...")
-        df = pd.read_excel(file_path, engine='openpyxl')  # Use 'openpyxl' for modern Excel files
-
-        print("Excel file read successfully.")
-        return df
-
-    except ValueError as ve:
-        # Raise validation-specific errors
-        print(f"Validation Error: {ve}")
-        raise ValueError(f"Validation Error: {ve}")
+            print("Debug: Processing file path input.")
+            return pd.read_excel(file_path, engine='openpyxl')
+        else:
+            raise ValueError("Invalid file_path type. Expected str or BytesIO.")
     except Exception as e:
-        # Catch other exceptions and raise with debug info
         print(f"Debug: Failed to read the Excel file: {e}")
         raise ValueError(f"Failed to read the Excel file: {e}")
 
 
+
 def validate_file_path(file_path):
     if isinstance(file_path, bytes):
-        if not file_path.startswith(b"PK"):
-            raise ValueError("Invalid bytes input. Does not represent a valid .xlsx file.")
+        if not file_path.startswith(b"PK"):  # Excel files start with 'PK'
+            with open("invalid_bytes_output.xlsx", "wb") as f:
+                f.write(file_path)
+            raise ValueError("Invalid bytes input. File saved for inspection.")
+        return BytesIO(file_path)
     elif isinstance(file_path, str):
-        if not file_path.endswith('.xlsx'):
-            raise ValueError("Invalid file format. Only .xlsx files are allowed.")
+        if not file_path.endswith(('.xlsx', '.xls')):
+            raise ValueError("Invalid file format. Only .xlsx and .xls files are supported.")
+        return file_path
     else:
-        raise ValueError("Invalid file_path type. Must be str or bytes.")
+        raise ValueError("Invalid file_path type. Expected str or bytes.")
+
 
 
 
@@ -797,60 +760,48 @@ def encrypt_data(selected_cells, file_path):
     Returns:
         None: Saves the encrypted file and AES key to disk.
     """
-    validate_file_path(file_path)
-
     try:
+        # Ensure cells are selected
         if not selected_cells:
             messagebox.showerror("Error", "No cells selected for encryption.")
             return
 
-        # Debug: Inspect file_path
-        print(f"File path received: {file_path}")
-        print(f"Type of file_path: {type(file_path)}")
-
+        # Debug: Log initial file_path details
+        print(f"Debug: Initial file_path: {file_path}")
+        print(f"Debug: Type of file_path: {type(file_path)}")
+        
         # Handle bytes input
         if isinstance(file_path, bytes):
-            print(f"Bytes content (first 100 bytes): {file_path[:100]}")
+            print(f"Debug: Bytes content (first 100 bytes): {file_path[:100]}")
             if not file_path.startswith(b"PK"):
                 with open("invalid_bytes_output.xlsx", "wb") as f:
                     f.write(file_path)
                 raise ValueError("Invalid Excel file content. File saved to 'invalid_bytes_output.xlsx' for inspection.")
             file_path = BytesIO(file_path)
 
-        # Handle string input
+        # Validate string input
         elif isinstance(file_path, str):
-            print(f"File path: {file_path}")
+            print(f"Debug: File path: {file_path}")
             if not file_path.endswith(('.xlsx', '.xls')):
                 raise ValueError("Invalid file format. Only .xlsx and .xls files are supported.")
 
+        else:
+            raise ValueError("Invalid file_path type. Expected str or bytes.")
+
+        file_path = validate_file_path(file_path)
+
         # Safely read the Excel file
         df = read_excel_safely(file_path)
-        print("DataFrame loaded successfully:")
+        print("Debug: DataFrame loaded successfully:")
         print(df.head())
 
-        # Encryption logic follows here...
+        # Validate RSA keys
+        public_key, _ = load_rsa_keys()
+        if not public_key:
+            raise ValueError("Public key not found. Ensure RSA keys are correctly loaded.")
 
-    except ValueError as e:
-        messagebox.showerror("Error", f"Validation Error: {e}")
-        print(f"Debug: {e}")
-    except Exception as e:
-        messagebox.showerror("Error", f"Encryption failed: {e}")
-        print(f"Debug: {e}")
-
-
-        # Load RSA public key
-        try:
-            keys = load_rsa_keys()  # Ensure this function is defined elsewhere
-            if not isinstance(keys, tuple) or len(keys) != 2:
-                raise ValueError("load_rsa_keys must return a tuple (public_key, private_key).")
-            public_key, _ = keys
-        except Exception as e:
-            raise ValueError(f"Error loading RSA keys: {e}")
-
-        # Generate AES key
+        # Generate AES key and encrypt it
         aes_key = get_random_bytes(16)
-
-        # Encrypt AES key using RSA
         cipher_rsa = PKCS1_OAEP.new(public_key)
         encrypted_aes_key = cipher_rsa.encrypt(aes_key)
 
@@ -859,7 +810,7 @@ def encrypt_data(selected_cells, file_path):
         with open(aes_key_file, 'wb') as f:
             f.write(encrypted_aes_key)
 
-        # Function to encrypt a single cell value
+        # Function to encrypt a single cell
         def encrypt_cell(value, aes_key):
             if pd.isna(value):  # Skip NaN values
                 return value
@@ -872,13 +823,12 @@ def encrypt_data(selected_cells, file_path):
         for row_index, col_name in selected_cells:
             if col_name not in df.columns:
                 raise ValueError(f"Column '{col_name}' not found in the Excel file.")
-            value = df.at[row_index, col_name]  # Get the cell value
-            df.at[row_index, col_name] = encrypt_cell(value, aes_key)  # Encrypt and update the value
+            value = df.at[row_index, col_name]
+            df.at[row_index, col_name] = encrypt_cell(value, aes_key)
 
-        print(f"Debug: file_path just before use: {file_path}")
-        print(f"Type: {type(file_path)}")
-        if isinstance(file_path, bytes):
-            print(f"Bytes content: {file_path[:100]}")
+        # Debug: Validate encryption
+        print("Debug: Sample encrypted data:")
+        print(df.head())
 
         # Save the updated file
         encrypted_file_path = filedialog.asksaveasfilename(
@@ -892,13 +842,13 @@ def encrypt_data(selected_cells, file_path):
 
         df.to_excel(encrypted_file_path, index=False)
 
-        # Provide feedback
+        # Provide success feedback
         messagebox.showinfo(
             "Success",
             f"Encrypted Excel file saved to:\n{encrypted_file_path}\nAES key saved to:\n{aes_key_file}"
         )
 
-        # Log the file activity into the database
+        # Log the encryption activity
         log_file_activity(
             user_id=current_user_id,
             user_email=current_user_email,
@@ -909,10 +859,9 @@ def encrypt_data(selected_cells, file_path):
             key=base64.b64encode(aes_key).decode('utf-8')
         )
 
-    
-    except ValueError as e:
-        messagebox.showerror("Error", f"Validation Error: {e}")
-        print(f"Debug: {e}")
+    except ValueError as ve:
+        messagebox.showerror("Error", f"Validation Error: {ve}")
+        print(f"Debug: {ve}")
     except Exception as e:
         messagebox.showerror("Error", f"Encryption failed: {e}")
         print(f"Debug: {e}")

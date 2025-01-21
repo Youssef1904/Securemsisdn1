@@ -51,8 +51,7 @@ plt.grid(visible=True, axis='x', linestyle='--', alpha=0.7)
 plt.tight_layout()
 
 # Save the updated Gantt chart as an image file
-file_path = "C:\\Users\\youss\\Desktop\\SecureMSISDN_Gantt_Chart.png"
+gantt_chart_path = "C:\\Users\\youss\\Desktop\\SecureMSISDN_Gantt_Chart.png"
+fig.savefig(gantt_chart_path, format='png', dpi=300)
+print(gantt_chart_path)
 
-fig.savefig(file_path, format='png', dpi=300)
-
-file_path
