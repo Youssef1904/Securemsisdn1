@@ -1,60 +1,37 @@
+import tkinter as tk
+from tkinter import messagebox, filedialog, simpledialog, Toplevel, ttk
 import ttkbootstrap as tb
 from ttkbootstrap.constants import *
-from tkinter import messagebox, filedialog, ttk
-from PIL import Image, ImageTk
-import pandas as pd
-from Crypto.Cipher import AES, PKCS1_OAEP
-from Crypto.PublicKey import RSA
-import base64
+from ttkbootstrap.style import Style
+from ttkbootstrap.tableview import Tableview  # ✅ Include Tableview
+from tkcalendar import DateEntry
+import sqlite3
+import datetime
+from datetime import datetime, timedelta
 import os
 import csv
-import datetime
-import sqlite3
 import hashlib
 import random
-from tkinter import simpledialog
 import subprocess
 import platform
-from ttkbootstrap.tableview import Tableview
-import ttkbootstrap as tb
-from tkinter import Tk
-import ttkbootstrap as tb
-from ttkbootstrap.style import Style
-from tkinter import filedialog, messagebox, ttk
-import ttkbootstrap as ttk
-from ttkbootstrap.constants import *
-import tkinter as tk
-from Crypto.Cipher import AES
-from Crypto.Util.Padding import pad, unpad
-import base64
-from tkinter import messagebox, Toplevel
-from Crypto.Cipher import AES
-from Crypto.Util.Padding import pad
-import base64
-import os
-from Crypto.PublicKey import RSA
-from Crypto.Cipher import PKCS1_OAEP, AES
-from Crypto.Util.Padding import pad, unpad
-import os
-import base64
-from datetime import datetime
-import tkinter as tk
-from tkinter import Toplevel, messagebox
-import datetime  
-from io import BytesIO
+from PIL import Image, ImageTk
 import pandas as pd
+import base64  # ✅ Include base64
 from Crypto.Cipher import AES, PKCS1_OAEP
+from Crypto.PublicKey import RSA
 from Crypto.Random import get_random_bytes
-import base64
-import os
-from tkinter import messagebox, filedialog
-
-
-# Initialize the app with a dark theme
-import ttkbootstrap as tb
-from ttkbootstrap import Style
-from tkinter import Tk
+from cryptography.hazmat.primitives import serialization, asymmetric, hashes
+from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives.hashes import SHA256
+from cryptography.hazmat.primitives.serialization import load_pem_private_key
+from io import BytesIO
+from Crypto.Util.Padding import pad, unpad
+# Initialize the app with ttkbootstrap style
 from key_request_function import request_access_window
+
+
+
+
 # Initialize the app with a white theme
 style = Style(theme="flatly")  # Start with a white-based theme
 root = style.master
@@ -290,17 +267,7 @@ def decrypt_key(encrypted_key: str, master_key: bytes) -> bytes:
     except Exception as e:
         raise ValueError(f"Error decrypting key: {e}")
 
-# Usage Example
-if __name__ == "__main__":
-    try:
-        aes_key = os.urandom(AES_KEY_SIZE)  # Generate a valid AES key
-        encrypted_aes_key = encrypt_key(aes_key, MASTER_KEY)
-        print("Encrypted AES Key:", encrypted_aes_key)
 
-        decrypted_aes_key = decrypt_key(encrypted_aes_key, MASTER_KEY)
-        print("Decrypted AES Key:", decrypted_aes_key)
-    except Exception as e:
-        print("Error:", e)
 
 
 
@@ -559,66 +526,118 @@ def display_excel_content(file_path, parent_frame):
         # Bind click event
         tree.bind("<Button-1>", on_cell_click)
 
-        # Add encryption button
-        def encrypt_selected_cells():
-            if not selected_cells:
-                messagebox.showerror("Error", "No cells selected for encryption.")
+         # Button to remove selected cells manually
+        def remove_selected_cells():
+            selected_items = selected_listbox.curselection()
+            if not selected_items:
+                messagebox.showinfo("Info", "No items selected to remove.")
                 return
 
+            for index in reversed(selected_items):  # Iterate in reverse to avoid index shifting
+                item_text = selected_listbox.get(index)
+                # Parse row and column from the string (e.g., "Row 1, Column 'MSISDN'")
+                row_col = item_text.split(", ")
+                row_index = int(row_col[0].split(" ")[1]) - 1  # Extract row index
+                col_name = row_col[1].split("'")[1]  # Extract column name
+                selected_cells.remove((row_index, col_name))  # Remove from selected cells
+                selected_listbox.delete(index)  # Remove from Listbox
+
+        tk.Button(listbox_frame, text="Remove Selected Cells", command=remove_selected_cells).pack(pady=10)
+        
+        def encrypt_selected_cells():
             try:
-                aes_key = os.urandom(16)  # Generate AES key
+                if not selected_cells:
+                    messagebox.showerror("Error", "No cells selected for encryption.")
+                    print("Debug: No cells selected for encryption.")
+                    return
 
+                # Create a copy of the DataFrame to avoid modifying the original file
+                df_copy = df.copy()
+                print("Debug: DataFrame copy created successfully.")
+
+                # Generate AES key
+                aes_key = get_random_bytes(16)
+                print(f"Debug: Generated AES key (base64): {base64.b64encode(aes_key).decode()}")
+
+                # Encrypt the selected cells
                 for row_index, col_name in selected_cells:
-                    value = df.at[row_index, col_name]
-                    if pd.notna(value):
-                        try:
-                            encrypted_value = encrypt_data(str(value), aes_key)
-                            df.at[row_index, col_name] = encrypted_value
-                        except Exception as e:
-                            messagebox.showwarning(
-                                "Encryption Warning",
-                                f"Failed to encrypt cell at Row {row_index + 1}, Column '{col_name}': {e}"
-                            )
+                    if col_name not in df_copy.columns:
+                        raise ValueError(f"Column '{col_name}' not found in the DataFrame.")
 
-                updated_file_path = filedialog.asksaveasfilename(
+                    value = df_copy.at[row_index, col_name]  # Get the cell value
+
+                    # Ensure column is cast to object to avoid type issues during encryption
+                    if df_copy[col_name].dtype != 'object':
+                        df_copy[col_name] = df_copy[col_name].astype('object')
+
+                    if pd.notna(value):  # Only encrypt non-NaN values
+                        encrypted_value = encrypt_data(value, aes_key)
+                        df_copy.at[row_index, col_name] = encrypted_value
+                        print(f"Debug: Encrypted cell at row {row_index}, column '{col_name}'. Original: {value}, Encrypted: {encrypted_value}")
+
+                # Prompt user to save the encrypted file
+                encrypted_file_path = filedialog.asksaveasfilename(
                     defaultextension=".xlsx",
                     filetypes=[("Excel files", "*.xlsx")],
                     title="Save Encrypted Excel File"
                 )
-                if not updated_file_path:
+                if not encrypted_file_path:
                     messagebox.showerror("Error", "File save operation was canceled.")
+                    print("Debug: File save operation was canceled.")
                     return
 
-                df.to_excel(updated_file_path, index=False)
-                aes_key_file_path = os.path.splitext(updated_file_path)[0] + "_aes_key.bin"
-                with open(aes_key_file_path, "wb") as aes_file:
-                    aes_file.write(aes_key)
+                # Save the encrypted DataFrame to the specified file path
+                df_copy.to_excel(encrypted_file_path, index=False)
+                print(f"Debug: Encrypted file saved to {encrypted_file_path}")
 
-                messagebox.showinfo(
-                    "Success",
-                    f"Encrypted Excel file saved to:\n{updated_file_path}\nAES key saved to:\n{aes_key_file_path}"
-                )
+                # Save the AES key encrypted with RSA
+                aes_key_file = os.path.splitext(encrypted_file_path)[0] + "_aes_key.bin"
+                try:
+                    # Load RSA public key to encrypt AES key
+                    with open("public.pem", "rb") as key_file:
+                        public_key = serialization.load_pem_public_key(key_file.read())
+                    encrypted_aes_key = public_key.encrypt(
+                        aes_key,
+                        padding.OAEP(mgf=padding.MGF1(algorithm=SHA256()), algorithm=SHA256(), label=None)
+                    )
 
+                    with open(aes_key_file, "wb") as f:
+                        f.write(encrypted_aes_key)
+                    print(f"Debug: AES key saved to {aes_key_file}")
+                except Exception as e:
+                    print(f"Debug: Failed to save AES key: {e}")
+                    raise ValueError(f"Failed to save AES key: {e}")
+
+                # Log the encryption activity
                 log_file_activity(
                     user_id=current_user_id,
                     user_email=current_user_email,
                     department=current_user_department,
-                    filename=os.path.basename(updated_file_path),
-                    file_size=os.path.getsize(updated_file_path),
+                    filename=os.path.basename(encrypted_file_path),
+                    file_size=os.path.getsize(encrypted_file_path),
                     activity_type="Cell Encryption",
-                    key=base64.b64encode(aes_key).decode('utf-8')
+                    key=base64.b64encode(aes_key).decode('utf-8')  # Save the AES key in base64 format
                 )
+                print("Debug: Encryption activity logged successfully.")
 
+                # Provide success feedback
+                messagebox.showinfo(
+                    "Success",
+                    f"Encrypted file saved to {encrypted_file_path}\nAES key saved to {aes_key_file}"
+                )
+                print(f"Debug: Total cells encrypted: {len(selected_cells)}")
+
+            except ValueError as ve:
+                messagebox.showerror("Error", f"Validation error: {ve}")
+                print(f"Debug: Validation error: {ve}")
             except Exception as e:
                 messagebox.showerror("Error", f"Encryption failed: {e}")
-
-        tk.Button(parent_frame, text="Encrypt Selected Cells", command=encrypt_selected_cells).pack(pady=10)
-
-    except Exception as e:
-        messagebox.showerror("Error", f"Failed to display Excel content: {e}")
+                print(f"Debug: Encryption failed: {e}")
 
 
 
+
+        # Add encryption button
         tk.Button(
             listbox_frame,
             text="Encrypt Selected Cells",
@@ -626,11 +645,14 @@ def display_excel_content(file_path, parent_frame):
         ).pack(pady=10)
 
     except Exception as e:
-        messagebox.showerror("Error", f"Failed to load Excel file: {e}")
+        messagebox.showerror("Error", f"Failed to display Excel content: {e}")
+
 
 
 def display_word_content(file_path, parent_frame):
     from docx import Document
+    import tkinter as tk
+    from tkinter import messagebox
 
     try:
         # Load Word document
@@ -642,53 +664,159 @@ def display_word_content(file_path, parent_frame):
         for para in doc.paragraphs:
             text_widget.insert("end", para.text + "\n")
 
-        # Add encryption button
+        # Cart to store selected text
+        cart = []
+
+        # Function to add selected text to the cart
+        def add_to_cart():
+            try:
+                selected_text = text_widget.selection_get()
+                if selected_text.strip():
+                    cart.append(selected_text)
+                    print(f"Debug: Added to cart: {selected_text}")
+                    messagebox.showinfo("Cart", f"'{selected_text}' added to the cart.")
+                else:
+                    messagebox.showerror("Error", "No text selected. Please highlight text to add to the cart.")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to add to cart: {e}")
+                print(f"Debug: {e}")
+
+        # Function to encrypt all items in the cart
+        def encrypt_cart_items():
+            if not cart:
+                messagebox.showerror("Error", "The cart is empty. Please add items to the cart before encrypting.")
+                return
+
+            try:
+                encrypt_selected_text_with_cart(text_widget, file_path, cart)
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to encrypt cart items: {e}")
+                print(f"Debug: {e}")
+
+        # Add "Add to Cart" button
         tk.Button(
             parent_frame,
-            text="Encrypt Selected Text",
-            command=lambda: encrypt_selected_text(text_widget, file_path)
-        ).pack(pady=10)
+            text="Add to Cart",
+            command=add_to_cart
+        ).pack(pady=5)
+
+        # Add "Encrypt Cart Items" button
+        tk.Button(
+            parent_frame,
+            text="Encrypt Cart Items",
+            command=encrypt_cart_items
+        ).pack(pady=5)
 
     except Exception as e:
         messagebox.showerror("Error", f"Failed to load Word file: {e}")
+        print(f"Debug: {e}")
 
-def encrypt_selected_text(text_widget, file_path):
+
+
+def encrypt_selected_text_with_cart(text_widget, file_path, cart):
+    """
+    Encrypts selected text from a Word file and replaces it with encrypted text. Adds selected text to the cart.
+    """
     from docx import Document
-    from cryptography.fernet import Fernet
+    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+    from cryptography.hazmat.primitives.asymmetric import padding
+    from cryptography.hazmat.primitives.hashes import SHA256
+    from cryptography.hazmat.primitives import serialization
+    import base64
+    import os
 
     try:
         # Validate file_path
         if not isinstance(file_path, str) or not file_path.endswith(".docx"):
             raise ValueError("Invalid file_path. Expected a valid .docx file.")
-        
+
         print(f"Debug: file_path before processing: {file_path}, Type: {type(file_path)}")
 
-        # Get selected text from the text widget
-        selected_text = text_widget.selection_get()
-        if not selected_text.strip():
-            messagebox.showerror("Error", "Please highlight text to encrypt.")
+        # Verify that text_widget is a proper Text widget
+        if not hasattr(text_widget, "tag_ranges"):
+            raise ValueError("Invalid text_widget. Expected a valid Text widget.")
+
+        # Get selected text ranges
+        selected_ranges = text_widget.tag_ranges("sel")
+        if not selected_ranges:
+            messagebox.showerror("Error", "Please highlight text to add to the cart.")
             return
 
-        # Generate encryption key and encrypt selected text
-        key = Fernet.generate_key()
-        cipher = Fernet(key)
-        encrypted_text = cipher.encrypt(selected_text.encode()).decode()
+        # Extract selected text
+        selected_text = text_widget.get(selected_ranges[0], selected_ranges[1]).strip()
+        if not selected_text:
+            messagebox.showerror("Error", "No valid text selected.")
+            return
 
-        # Modify the Word file
-        doc = Document(file_path)
-        for para in doc.paragraphs:
-            para.text = para.text.replace(selected_text, encrypted_text)
+        # Add selected text to the cart
+        cart.append(selected_text)
+        print(f"Debug: Added to cart: {selected_text}")
 
-        # Save the modified Word file
-        updated_file_path = filedialog.asksaveasfilename(
-            defaultextension=".docx",
-            filetypes=[("Word documents", "*.docx")],
-            title="Save Encrypted Word File"
-        )
-        if updated_file_path:
+        # Encrypt text in the cart
+        if messagebox.askyesno("Encrypt", "Do you want to encrypt all items in the cart?"):
+            aes_key = os.urandom(32)  # Use a 256-bit AES key
+            iv = os.urandom(12)  # Recommended size for GCM is 12 bytes
+            encrypted_text_map = {}
+
+            # Encrypt each item in the cart
+            for item in cart:
+                cipher = Cipher(algorithms.AES(aes_key), modes.GCM(iv))
+                encryptor = cipher.encryptor()
+                ciphertext = encryptor.update(item.encode()) + encryptor.finalize()
+                encrypted_text_map[item] = base64.b64encode(iv + encryptor.tag + ciphertext).decode()
+
+            # Modify the Word file
+            doc = Document(file_path)
+            for para in doc.paragraphs:
+                for original_text, encrypted_text in encrypted_text_map.items():
+                    if original_text in para.text:
+                        para.text = para.text.replace(original_text, encrypted_text)
+
+            # Save the modified Word file
+            updated_file_path = filedialog.asksaveasfilename(
+                defaultextension=".docx",
+                filetypes=[("Word documents", "*.docx")],
+                title="Save Encrypted Word File"
+            )
+            if not updated_file_path:
+                messagebox.showerror("Error", "File save operation was canceled.")
+                return
             doc.save(updated_file_path)
-            messagebox.showinfo("Success", f"Encrypted Word file saved at {updated_file_path}")
+
+            # Load RSA public key to encrypt AES key
+            with open("public.pem", "rb") as key_file:
+                public_key = serialization.load_pem_public_key(key_file.read())
+            encrypted_aes_key = public_key.encrypt(
+                aes_key,
+                padding.OAEP(mgf=padding.MGF1(algorithm=SHA256()), algorithm=SHA256(), label=None)
+            )
+
+            # Save the encrypted AES key to a separate file
+            aes_key_file = os.path.splitext(updated_file_path)[0] + "_aes_key.bin"
+            with open(aes_key_file, "wb") as f:
+                f.write(encrypted_aes_key)
+
+            # Log activity
+            log_file_activity(
+                user_id=current_user_id,
+                user_email=current_user_email,
+                department=current_user_department,
+                filename=os.path.basename(updated_file_path),
+                file_size=os.path.getsize(updated_file_path),
+                activity_type="Word File Encryption",
+                key=base64.b64encode(aes_key).decode("utf-8")
+            )
+
+            # Display success message
+            messagebox.showinfo(
+                "Success",
+                f"Encrypted Word file saved to {updated_file_path}\nAES key saved to {aes_key_file}"
+            )
             print(f"Encrypted file saved at: {updated_file_path}")
+            print(f"Key saved at: {aes_key_file}")
+
+            # Clear the cart after encryption
+            cart.clear()
 
     except ValueError as ve:
         messagebox.showerror("Error", f"Validation error: {ve}")
@@ -697,6 +825,10 @@ def encrypt_selected_text(text_widget, file_path):
     except Exception as e:
         messagebox.showerror("Error", f"An error occurred: {e}")
         print(f"Debug: {e}")
+
+
+
+
 
 
 from io import BytesIO
@@ -749,238 +881,296 @@ def validate_file_path(file_path):
 
 
 
-def encrypt_data(selected_cells, file_path):
+def encrypt_data(value, aes_key):
     """
-    Encrypts the selected cells in an Excel file using a hybrid encryption method (AES + RSA).
+    Encrypts a single value using the provided AES key.
 
     Parameters:
-        selected_cells (list of tuples): List of (row_index, col_name) tuples specifying cells to encrypt.
-        file_path (str or bytes): Path to the Excel file or a bytes object.
+        value (str): The value to encrypt.
+        aes_key (bytes): The AES key used for encryption.
 
     Returns:
-        None: Saves the encrypted file and AES key to disk.
+        str: The encrypted value encoded in base64.
     """
     try:
-        # Ensure cells are selected
-        if not selected_cells:
-            messagebox.showerror("Error", "No cells selected for encryption.")
-            return
+        if pd.isna(value):  # Skip NaN values
+            return value
 
-        # Debug: Log initial file_path details
-        print(f"Debug: Initial file_path: {file_path}")
-        print(f"Debug: Type of file_path: {type(file_path)}")
-        
-        # Handle bytes input
-        if isinstance(file_path, bytes):
-            print(f"Debug: Bytes content (first 100 bytes): {file_path[:100]}")
-            if not file_path.startswith(b"PK"):
-                with open("invalid_bytes_output.xlsx", "wb") as f:
-                    f.write(file_path)
-                raise ValueError("Invalid Excel file content. File saved to 'invalid_bytes_output.xlsx' for inspection.")
-            file_path = BytesIO(file_path)
+        # Encrypt the value using AES
+        cipher_aes = AES.new(aes_key, AES.MODE_EAX)
+        nonce = cipher_aes.nonce
+        ciphertext, tag = cipher_aes.encrypt_and_digest(str(value).encode('utf-8'))
 
-        # Validate string input
-        elif isinstance(file_path, str):
-            print(f"Debug: File path: {file_path}")
-            if not file_path.endswith(('.xlsx', '.xls')):
-                raise ValueError("Invalid file format. Only .xlsx and .xls files are supported.")
+        # Combine nonce, tag, and ciphertext into a single base64-encoded string
+        encrypted_value = base64.b64encode(nonce + tag + ciphertext).decode('utf-8')
 
-        else:
-            raise ValueError("Invalid file_path type. Expected str or bytes.")
+        print(f"Debug: Successfully encrypted value: {value} -> {encrypted_value}")
+        return encrypted_value
 
-        file_path = validate_file_path(file_path)
-
-        # Safely read the Excel file
-        df = read_excel_safely(file_path)
-        print("Debug: DataFrame loaded successfully:")
-        print(df.head())
-
-        # Validate RSA keys
-        public_key, _ = load_rsa_keys()
-        if not public_key:
-            raise ValueError("Public key not found. Ensure RSA keys are correctly loaded.")
-
-        # Generate AES key and encrypt it
-        aes_key = get_random_bytes(16)
-        cipher_rsa = PKCS1_OAEP.new(public_key)
-        encrypted_aes_key = cipher_rsa.encrypt(aes_key)
-
-        # Save the encrypted AES key
-        aes_key_file = os.path.splitext(file_path if isinstance(file_path, str) else "encrypted_file")[0] + "_aes_key.bin"
-        with open(aes_key_file, 'wb') as f:
-            f.write(encrypted_aes_key)
-
-        # Function to encrypt a single cell
-        def encrypt_cell(value, aes_key):
-            if pd.isna(value):  # Skip NaN values
-                return value
-            cipher_aes = AES.new(aes_key, AES.MODE_EAX)
-            nonce = cipher_aes.nonce
-            ciphertext, tag = cipher_aes.encrypt_and_digest(str(value).encode('utf-8'))
-            return base64.b64encode(nonce + tag + ciphertext).decode('utf-8')
-
-        # Encrypt the selected cells
-        for row_index, col_name in selected_cells:
-            if col_name not in df.columns:
-                raise ValueError(f"Column '{col_name}' not found in the Excel file.")
-            value = df.at[row_index, col_name]
-            df.at[row_index, col_name] = encrypt_cell(value, aes_key)
-
-        # Debug: Validate encryption
-        print("Debug: Sample encrypted data:")
-        print(df.head())
-
-        # Save the updated file
-        encrypted_file_path = filedialog.asksaveasfilename(
-            defaultextension=".xlsx",
-            filetypes=[("Excel files", "*.xlsx")],
-            title="Save Encrypted Excel File"
-        )
-        if not encrypted_file_path:
-            messagebox.showerror("Error", "File save operation was canceled.")
-            return
-
-        df.to_excel(encrypted_file_path, index=False)
-
-        # Provide success feedback
-        messagebox.showinfo(
-            "Success",
-            f"Encrypted Excel file saved to:\n{encrypted_file_path}\nAES key saved to:\n{aes_key_file}"
-        )
-
-        # Log the encryption activity
-        log_file_activity(
-            user_id=current_user_id,
-            user_email=current_user_email,
-            department=current_user_department,
-            filename=os.path.basename(encrypted_file_path),
-            file_size=os.path.getsize(encrypted_file_path),
-            activity_type="Cell Encryption",
-            key=base64.b64encode(aes_key).decode('utf-8')
-        )
-
-    except ValueError as ve:
-        messagebox.showerror("Error", f"Validation Error: {ve}")
-        print(f"Debug: {ve}")
     except Exception as e:
-        messagebox.showerror("Error", f"Encryption failed: {e}")
-        print(f"Debug: {e}")
+        print(f"Debug: Encryption failed for value '{value}': {e}")
+        raise ValueError(f"Encryption failed for value '{value}': {e}")
 
 
 
 
 
+
+def upload_file():
+    """
+    Prompts the user to upload an Excel or Word file and sets the global file_path variable.
+    """
+    global file_path
+    file_path = filedialog.askopenfilename(
+        filetypes=[
+            ("Supported Files", "*.xlsx *.xls *.docx"),
+            ("Excel Files", "*.xlsx *.xls"),
+            ("Word Files", "*.docx"),
+        ],
+        title="Select a file to decrypt",
+    )
+
+    if not file_path:
+        messagebox.showerror("Error", "No file selected.")
+        return
+
+    # Check the file extension
+    file_extension = os.path.splitext(file_path)[-1].lower()
+    if file_extension not in [".xlsx", ".xls", ".docx"]:
+        messagebox.showerror("Error", "Unsupported file type. Please upload an Excel or Word file.")
+        file_path = None  # Reset the file_path
+        return
+
+    # Provide feedback to the user
+    messagebox.showinfo("Success", f"File selected: {os.path.basename(file_path)}")
 
 
 
 
 def decrypt_data():
+    """
+    Decrypts either an Excel or Word file based on the file type.
+    """
     try:
-        # 1. Make sure a file is selected
         if not file_path:
-            messagebox.showerror("Error", "Please upload an encrypted Excel file first.")
+            messagebox.showerror("Error", "Please upload an encrypted file first.")
             return
 
-        # 2. Convert file path to base name and check for an approved request
-        filename_only = os.path.basename(file_path)  # e.g., "data_encrypted.xlsx"
+        print(f"Debug: Uploaded file_path: {file_path}")
 
-       
-
-        conn = sqlite3.connect('ooredoo.db')
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT status 
-            FROM key_requests
-            WHERE user_id = ?
-              AND file_name = ?
-            ORDER BY request_id DESC
-            LIMIT 1
-        """, (current_user_id, filename_only))
-        row = cursor.fetchone()
-        conn.close()
-
-        if not row or row[0] != 'APPROVED':
-            messagebox.showerror("Error", "You do not have an approved request to decrypt this file.")
-            return
-
-        # 3. Determine the associated AES key file path
+        file_extension = os.path.splitext(file_path)[-1].lower()
         key_file_path = os.path.splitext(file_path)[0] + "_aes_key.bin"
+        print(f"Debug: File extension: {file_extension}")
+        print(f"Debug: Associated AES key file: {key_file_path}")
+
         if not os.path.exists(key_file_path):
             messagebox.showerror("Error", f"AES key file not found for {os.path.basename(file_path)}.")
             return
 
-        # 4. Load the private RSA key
-        with open('private.pem', 'rb') as f:
-            private_key = RSA.import_key(f.read())
+        try:
+            with open("private.pem", "rb") as f:
+                private_key = serialization.load_pem_private_key(f.read(), password=None)
+            print(f"Debug: Private RSA key loaded successfully: {private_key.key_size} bits")
 
-        # 5. Decrypt the AES key with RSA
-        with open(key_file_path, 'rb') as f:
-            encrypted_aes_key = f.read()
-        cipher_rsa = PKCS1_OAEP.new(private_key)
-        aes_key = cipher_rsa.decrypt(encrypted_aes_key)
+        except Exception as e:
+            print(f"Debug: Failed to load private RSA key: {e}")
+            raise
 
-        # 6. Load the encrypted Excel data
-        df = pd.read_excel(file_path)
+        try:
+            with open(key_file_path, "rb") as f:
+                encrypted_aes_key = f.read()
+            print(f"Debug: Encrypted AES key loaded (length: {len(encrypted_aes_key)}).")
+        except Exception as e:
+            print(f"Debug: Failed to read encrypted AES key file: {e}")
+            raise
 
-        # 7. Check if 'Encrypted_MSISDN' column is present
-        if 'Encrypted_MSISDN' not in df.columns:
-            messagebox.showerror("Error", "'Encrypted_MSISDN' column not found in the Excel file.")
+        print(f"Debug: Encrypted AES key (base64): {base64.b64encode(encrypted_aes_key).decode()}")
+
+        try:
+            aes_key = private_key.decrypt(
+                encrypted_aes_key,
+                padding.OAEP(
+                    mgf=padding.MGF1(algorithm=SHA256()),
+                    algorithm=SHA256(),
+                    label=None
+                )
+            )
+            print(f"Debug: Decrypted AES key (base64): {base64.b64encode(aes_key).decode()}")
+        except Exception as e:
+            print(f"Debug: Failed to decrypt AES key: {e}")
+            raise
+
+        if file_extension in [".xlsx", ".xls"]:
+            decrypt_excel(file_path, aes_key)
+        elif file_extension == ".docx":
+            decrypt_word(file_path, aes_key)
+        else:
+            messagebox.showerror("Error", "Unsupported file type. Please upload an Excel or Word file.")
             return
 
-        # 8. Function to decrypt each MSISDN value
-        def decrypt_msisdn(enc_msisdn, key):
-            data = base64.b64decode(enc_msisdn)
-            nonce, tag, ciphertext = data[:16], data[16:32], data[32:]
-            cipher_aes = AES.new(key, AES.MODE_EAX, nonce=nonce)
-            return cipher_aes.decrypt_and_verify(ciphertext, tag).decode('utf-8')
-
-        # 9. Create a 'MSISDN' column by decrypting the existing 'Encrypted_MSISDN' values
-        df['MSISDN'] = df['Encrypted_MSISDN'].apply(lambda enc: decrypt_msisdn(enc, aes_key))
-
-        # 10. Remove the 'Encrypted_MSISDN' column
-        df.drop(columns=['Encrypted_MSISDN'], inplace=True)
-
-        # 11. Ask user where to save the decrypted file
-        decrypted_file_path = filedialog.asksaveasfilename(
-            defaultextension=".xlsx", 
-            filetypes=[("Excel files", "*.xlsx")]
-        )
-        if not decrypted_file_path:
-            messagebox.showerror("Error", "Please specify a valid file path to save the decrypted data.")
-            return
-
-        df.to_excel(decrypted_file_path, index=False)
-
-        # 12. Indicate success
-        messagebox.showinfo("Success", f"Data decrypted and saved to {decrypted_file_path}")
-
-        # 13. Mark the request as acknowledged (ack_received=1)
-        conn = sqlite3.connect('ooredoo.db')
-        cursor = conn.cursor()
-        cursor.execute("""
-            UPDATE key_requests
-            SET ack_received = 1,
-                ack_timestamp = datetime('now')
-            WHERE user_id = ?
-              AND file_name = ?
-              AND status = 'APPROVED'
-        """, (current_user_id, filename_only))
-        conn.commit()
-        conn.close()
-
-        # 14. Log the file activity (using user_id, user_email, etc.)
         log_file_activity(
             user_id=current_user_id,
-            user_email=current_user_email,  # or pass something else if you prefer
+            user_email=current_user_email,
             department=current_user_department,
-            filename=os.path.basename(decrypted_file_path),
-            file_size=os.path.getsize(decrypted_file_path),
+            filename=os.path.basename(file_path),
+            file_size=os.path.getsize(file_path),
             activity_type="Decryption",
-            key=base64.b64encode(aes_key).decode('utf-8')
+            key=base64.b64encode(aes_key).decode("utf-8"),
         )
+        print("Debug: Decryption process completed successfully.")
 
     except Exception as e:
         messagebox.showerror("Error", f"Decryption failed: {e}")
+        print(f"Debug: Decryption failed: {e}")
+
+
+
+def decrypt_excel(file_path, aes_key):
+    """
+    Decrypts an Excel file using the provided AES key.
+
+    Parameters:
+        file_path (str): Path to the encrypted Excel file.
+        aes_key (bytes): The AES key to decrypt the file.
+
+    Raises:
+        ValueError: If decryption fails or input parameters are invalid.
+    """
+    try:
+        # Validate input parameters
+        if not isinstance(file_path, str) or not file_path.endswith((".xlsx", ".xls")):
+            raise ValueError("Invalid file_path. Must be a valid .xlsx or .xls file.")
+        if not isinstance(aes_key, bytes) or len(aes_key) not in [16, 24, 32]:
+            raise ValueError("Invalid AES key. Ensure it's a 128-bit, 192-bit, or 256-bit key.")
+
+        # Debug: Log the file path and key details
+        print(f"Debug: Decrypting file: {file_path}")
+        print(f"Debug: AES key (base64): {base64.b64encode(aes_key).decode()}")
+
+        # Load the encrypted Excel file
+        df = pd.read_excel(file_path)
+        print("Debug: Encrypted Excel file loaded successfully.")
+
+        # Function to decrypt a single cell
+        def decrypt_cell(value):
+            if pd.isna(value) or not is_base64_encoded(value):
+                print(f"Debug: Skipping non-encrypted value: {value}")
+                return value  # Skip non-encrypted values
+            try:
+                print(f"Debug: Decrypting value: {value}")
+                data = base64.b64decode(value)
+                nonce, tag, ciphertext = data[:16], data[16:32], data[32:]
+                cipher_aes = AES.new(aes_key, AES.MODE_EAX, nonce=nonce)
+                decrypted_value = cipher_aes.decrypt_and_verify(ciphertext, tag).decode('utf-8')
+                print(f"Debug: Decrypted value: {decrypted_value}")
+                return decrypted_value
+            except Exception as decryption_error:
+                print(f"Debug: Failed to decrypt value: {value}. Error: {decryption_error}")
+                raise ValueError(f"Decryption failed for value: {value}. Error: {decryption_error}")
+
+        # Decrypt all cells in the DataFrame
+        print("Debug: Starting decryption of all cells.")
+        for col in df.columns:
+            print(f"Debug: Decrypting column: {col}")
+            df[col] = df[col].apply(decrypt_cell)
+
+        # Save the decrypted file
+        decrypted_file_path = filedialog.asksaveasfilename(
+            defaultextension=".xlsx",
+            filetypes=[("Excel files", "*.xlsx")],
+            title="Save Decrypted Excel File"
+        )
+        if not decrypted_file_path:
+            raise ValueError("Decryption canceled. No save path specified.")
+
+        df.to_excel(decrypted_file_path, index=False)
+        messagebox.showinfo("Success", f"Decrypted Excel file saved to {decrypted_file_path}")
+        print(f"Debug: Decrypted file saved to: {decrypted_file_path}")
+
+    except ValueError as ve:
+        messagebox.showerror("Error", f"Validation error: {ve}")
+        print(f"Debug: {ve}")
+    except Exception as e:
+        messagebox.showerror("Error", f"Failed to decrypt Excel file: {e}")
+        print(f"Debug: Failed to decrypt Excel file: {e}")
+
+
+
+import re
+
+def is_base64_encoded(value):
+    if not isinstance(value, str):
+        return False
+    try:
+        decoded = base64.b64decode(value, validate=True)
+        # Optionally, enforce a minimum length for encrypted data
+        return len(decoded) > 32  # Minimum length for nonce + tag + ciphertext
+    except Exception:
+        return False
+
+
+from docx import Document
+def decrypt_word(file_path, aes_key):
+    """
+    Decrypts a Word file using the provided AES key, processing each word individually.
+    """
+    from docx import Document
+    import base64
+    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+    from tkinter import filedialog, messagebox
+
+    try:
+        doc = Document(file_path)
+        print(f"Debug: Loaded Word file: {file_path}")
+
+        def decrypt_word_text(encrypted_word):
+            """
+            Decrypts a single encrypted word using AES-GCM.
+            """
+            if not is_base64_encoded(encrypted_word):
+                print(f"Debug: Skipping non-encrypted word: {encrypted_word}")
+                return encrypted_word  # Skip non-encrypted words
+
+            try:
+                data = base64.b64decode(encrypted_word)
+                iv, tag, ciphertext = data[:12], data[12:28], data[28:]
+                cipher = Cipher(algorithms.AES(aes_key), modes.GCM(iv))
+                decryptor = cipher.decryptor()
+                decrypted_word = decryptor.update(ciphertext) + decryptor.finalize_with_tag(tag)
+                return decrypted_word.decode("utf-8")
+            except Exception as e:
+                print(f"Debug: Failed to decrypt word: {encrypted_word}. Error: {e}")
+                return encrypted_word  # If decryption fails, return the original word
+
+        # Process each paragraph word by word
+        for para in doc.paragraphs:
+            if para.text.strip():  # Skip empty paragraphs
+                print(f"Debug: Original paragraph text: {para.text}")
+                words = para.text.split()  # Split paragraph into individual words
+                decrypted_words = [decrypt_word_text(word) for word in words]
+                para.text = " ".join(decrypted_words)  # Reconstruct the paragraph
+                print(f"Debug: Decrypted paragraph text: {para.text}")
+
+        # Save the decrypted Word file
+        decrypted_file_path = filedialog.asksaveasfilename(
+            defaultextension=".docx",
+            filetypes=[("Word documents", "*.docx")],
+            title="Save Decrypted Word File"
+        )
+        if not decrypted_file_path:
+            messagebox.showerror("Error", "File save operation was canceled.")
+            return
+
+        doc.save(decrypted_file_path)
+        messagebox.showinfo("Success", f"Decrypted Word file saved to {decrypted_file_path}")
+        print(f"Decrypted Word file saved at: {decrypted_file_path}")
+
+    except Exception as e:
+        messagebox.showerror("Error", f"Failed to decrypt Word file: {e}")
+        print(f"Debug: Failed to decrypt Word file: {e}")
+
+
+
 
 
 
@@ -1161,6 +1351,9 @@ def manage_key_requests_window():
     
     refresh_requests()
 
+def return_to_operation_choice(window):
+    window.destroy()  # Close current window
+    create_operation_choice_page()  # Reopen the main operation choice window
 
 def show_dashboard():
     global current_user_department, last_page
@@ -1285,7 +1478,7 @@ def show_dashboard():
     tb.Button(
         dashboard_frame,
         text="Return",
-        command=navigate_back,
+        command=lambda: return_to_operation_choice(dashboard_frame),
         bootstyle="secondary-outline"
     ).pack(pady=10)
 
@@ -1300,6 +1493,274 @@ def get_all_users():
 
 # Call init_db() when the app starts to ensure the database is ready
 init_db()
+
+
+# ------------------- Equipment Management Window -------------------
+
+
+
+
+def manage_equipment():
+    equipment_window = tb.Toplevel(root)
+    equipment_window.title("Equipment Management")
+    equipment_window.geometry("900x600")
+
+    tb.Label(equipment_window, text="Equipment Management", font=("Arial", 14, "bold"), bootstyle="primary").pack(pady=10)
+
+    # Frame for Table and Scrollbars
+    table_frame = tb.Frame(equipment_window)
+    table_frame.pack(fill="both", expand=True, padx=10, pady=10)
+
+    # Define Columns
+    columns = ("ID", "Name", "Category", "Manufacturer", "Model", "Serial Number",
+               "Purchase Date", "Warranty End Date", "Status", "Location", "Assigned Project")
+
+    # Treeview with Scrollbars
+    equipment_table = tb.Treeview(table_frame, columns=columns, show="headings", bootstyle="info")
+    for col in columns:
+        equipment_table.heading(col, text=col)
+        equipment_table.column(col, width=120, anchor="center")
+
+    # Scrollbars
+    y_scroll = tb.Scrollbar(table_frame, orient="vertical", command=equipment_table.yview)
+    x_scroll = tb.Scrollbar(table_frame, orient="horizontal", command=equipment_table.xview)
+    equipment_table.configure(yscrollcommand=y_scroll.set, xscrollcommand=x_scroll.set)
+    y_scroll.pack(side="right", fill="y")
+    x_scroll.pack(side="bottom", fill="x")
+    equipment_table.pack(fill="both", expand=True)
+
+    # ----------------- Search and Filter Section -----------------
+    filter_frame = tb.Frame(equipment_window)
+    filter_frame.pack(fill="x", padx=10, pady=5)
+
+    tb.Label(filter_frame, text="Search:", bootstyle="info").pack(side="left", padx=5)
+    search_entry = tb.Entry(filter_frame)
+    search_entry.pack(side="left", padx=5)
+
+    def fetch_categories():
+        with sqlite3.connect("ooredoo_equipements.db") as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT name FROM Categories")
+            categories = ["All"] + [row[0] for row in cursor.fetchall()]
+        return categories
+
+    # Dropdowns
+    def update_dropdowns():
+        category_menu["menu"].delete(0, "end")
+        status_menu["menu"].delete(0, "end")
+
+        for category in fetch_categories():
+            category_menu["menu"].add_command(label=category, command=lambda value=category: category_var.set(value))
+
+        for status in ["All", "Active", "In Maintenance", "Decommissioned"]:
+            status_menu["menu"].add_command(label=status, command=lambda value=status: status_var.set(value))
+
+    tb.Label(filter_frame, text="Category:", bootstyle="info").pack(side="left", padx=5)
+    category_var = tb.StringVar(value="All")
+    category_menu = tb.OptionMenu(filter_frame, category_var, *fetch_categories())
+    category_menu.pack(side="left", padx=5)
+
+    tb.Label(filter_frame, text="Status:", bootstyle="info").pack(side="left", padx=5)
+    status_var = tb.StringVar(value="All")
+    status_menu = tb.OptionMenu(filter_frame, status_var, "All", "Active", "In Maintenance", "Decommissioned")
+    status_menu.pack(side="left", padx=5)
+
+    tb.Button(filter_frame, text="Apply Filters",
+              command=lambda: load_equipment(search_entry.get(), category_var.get(), status_var.get()),
+              bootstyle="primary").pack(side="left", padx=5)
+
+    # ----------------- Load Equipment Data -----------------
+    def load_equipment(search_query="", category_filter="All", status_filter="All"):
+        equipment_table.delete(*equipment_table.get_children())
+
+        with sqlite3.connect("ooredoo_equipements.db") as conn:
+            cursor = conn.cursor()
+            query = """
+                SELECT Equipments.id, Equipments.name, Categories.name, Equipments.manufacturer, Equipments.model, 
+                    Equipments.serial_number, Equipments.purchase_date, Equipments.warranty_end_date, Equipments.status, 
+                    Equipments.location, Equipments.assigned_project 
+                FROM Equipments
+                JOIN Categories ON Equipments.category_id = Categories.id
+                WHERE 1=1
+            """
+            params = []
+            if search_query.strip():
+                query += " AND (Equipments.name LIKE ? OR Equipments.manufacturer LIKE ? OR Equipments.serial_number LIKE ?)"
+                params.extend([f"%{search_query}%", f"%{search_query}%", f"%{search_query}%"])
+
+            if category_filter != "All":
+                query += " AND Categories.name = ?"
+                params.append(category_filter)
+
+            if status_filter != "All":
+                query += " AND Equipments.status = ?"
+                params.append(status_filter)
+
+            cursor.execute(query, params)
+            results = cursor.fetchall()
+            for row in results:
+                equipment_table.insert("", "end", values=row)
+
+        update_dropdowns()
+
+    # ----------------- Schedule Maintenance -----------------
+    def schedule_maintenance():
+        selected_item = equipment_table.selection()
+        if not selected_item:
+            messagebox.showerror("Error", "Please select an equipment to schedule maintenance.")
+            return
+
+        item_data = equipment_table.item(selected_item)["values"]
+        equip_id = item_data[0]  # Get Equipment ID
+
+        schedule_window = tb.Toplevel(equipment_window)
+        schedule_window.title("Schedule Maintenance")
+        schedule_window.geometry("400x300")
+
+        # Frame for layout
+        frame = tb.Frame(schedule_window)
+        frame.pack(padx=10, pady=10, fill="both", expand=True)
+
+        # Corrected Date Picker (Fix conflicts)
+        tb.Label(frame, text="Select Maintenance Date:", bootstyle="info").pack(pady=10)
+        maintenance_date = DateEntry(frame, date_pattern="yyyy-mm-dd", width=12, background="white", foreground="black", borderwidth=2)
+        maintenance_date.pack(pady=5, fill="x")
+
+        # Notes Entry (Optional)
+        tb.Label(frame, text="Notes (Optional):", bootstyle="info").pack(pady=5)
+        notes_entry = tb.Entry(frame)
+        notes_entry.pack(pady=5, fill="x")
+
+        def save_maintenance():
+            selected_date = maintenance_date.get_date().strftime("%Y-%m-%d")
+
+            with sqlite3.connect("ooredoo_equipements.db") as conn:
+                cursor = conn.cursor()
+
+                # Check if maintenance is already scheduled
+                cursor.execute("""
+                    SELECT COUNT(*) FROM MaintenanceSchedule 
+                    WHERE equipment_id = ? AND maintenance_date = ? AND status = 'Scheduled'
+                """, (equip_id, selected_date))
+                existing_maintenance = cursor.fetchone()[0]
+
+                if existing_maintenance > 0:
+                    messagebox.showerror("Error", "Maintenance is already scheduled for this date.")
+                    return
+
+                # Insert maintenance record
+                cursor.execute("""
+                    INSERT INTO MaintenanceSchedule (equipment_id, maintenance_date, status, notes) 
+                    VALUES (?, ?, 'Scheduled', ?)""",
+                    (equip_id, selected_date, notes_entry.get()))
+                
+                # Update status to "In Maintenance"
+                cursor.execute("UPDATE Equipments SET status='In Maintenance' WHERE id=?", (equip_id,))
+                conn.commit()
+
+            schedule_window.destroy()
+            load_equipment()
+            messagebox.showinfo("Success", "Maintenance Scheduled Successfully!")
+
+        tb.Button(frame, text="Schedule Maintenance", command=save_maintenance, bootstyle="success").pack(pady=10)
+
+        # ----------------- Buttons -----------------
+    
+    tb.Button(equipment_window, text="Edit Equipment", bootstyle="warning-outline").pack(pady=5)
+    tb.Button(equipment_window, text="Delete Equipment", bootstyle="danger-outline").pack(pady=5)
+    tb.Button(equipment_window, text="Refresh List", command=load_equipment, bootstyle="info-outline").pack(pady=5)
+    tb.Button(equipment_window, text="Return", bootstyle="danger-outline").pack(pady=10)
+    tb.Button(equipment_window, text="Schedule Maintenance", command=schedule_maintenance, bootstyle="warning-outline").pack(pady=5)
+
+    load_equipment()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# ------------------- Project Management Window -------------------
+def manage_projects():
+    project_window = tb.Toplevel(root)
+    project_window.title("Project Management")
+    project_window.geometry("700x500")
+
+    tb.Label(project_window, text="Project Management", font=("Arial", 14, "bold"), bootstyle="primary").pack(pady=20)
+
+    # Table to display projects
+    columns = ("ID", "Project Name", "Status", "Manager", "Start Date", "End Date")
+    project_table = tb.Treeview(project_window, columns=columns, show="headings", bootstyle="info")
+
+    for col in columns:
+        project_table.heading(col, text=col)
+        project_table.column(col, width=120)
+
+    project_table.pack(fill="both", expand=True, padx=20, pady=10)
+
+    # Function to load project data
+    def load_projects():
+        project_table.delete(*project_table.get_children())  # Clear table
+        conn = sqlite3.connect("ooredoo.db")
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM projects")
+        for row in cursor.fetchall():
+            project_table.insert("", "end", values=row)
+        conn.close()
+
+    # Function to add a new project
+    def add_project():
+        add_window = tb.Toplevel(project_window)
+        add_window.title("Add Project")
+        add_window.geometry("400x350")
+
+        tb.Label(add_window, text="Project Name:").pack(pady=5)
+        entry_name = tb.Entry(add_window)
+        entry_name.pack(pady=5)
+
+        tb.Label(add_window, text="Status:").pack(pady=5)
+        entry_status = tb.Entry(add_window)
+        entry_status.pack(pady=5)
+
+        tb.Label(add_window, text="Manager:").pack(pady=5)
+        entry_manager = tb.Entry(add_window)
+        entry_manager.pack(pady=5)
+
+        tb.Label(add_window, text="Start Date (YYYY-MM-DD):").pack(pady=5)
+        entry_start_date = tb.Entry(add_window)
+        entry_start_date.pack(pady=5)
+
+        tb.Label(add_window, text="End Date (YYYY-MM-DD):").pack(pady=5)
+        entry_end_date = tb.Entry(add_window)
+        entry_end_date.pack(pady=5)
+
+        def save_project():
+            conn = sqlite3.connect("ooredoo.db")
+            cursor = conn.cursor()
+            cursor.execute("INSERT INTO projects (name, status, manager, start_date, end_date) VALUES (?, ?, ?, ?, ?)",
+                           (entry_name.get(), entry_status.get(), entry_manager.get(), entry_start_date.get(), entry_end_date.get()))
+            conn.commit()
+            conn.close()
+            add_window.destroy()
+            load_projects()
+
+        tb.Button(add_window, text="Add Project", command=save_project, bootstyle="success").pack(pady=10)
+
+    tb.Button(project_window, text="Add Project", command=add_project, bootstyle="success-outline").pack(pady=10)
+    tb.Button(project_window, text="Refresh List", command=load_projects, bootstyle="info-outline").pack(pady=5)
+
+     # 🔙 Return Button
+    tb.Button(project_window, text="Return", command=lambda: return_to_operation_choice(project_window), bootstyle="danger-outline").pack(pady=10)
+    load_projects()  # Load projects initially
+
 
 
 def create_main_page(is_encryption=True):
@@ -1330,12 +1791,12 @@ def create_main_page(is_encryption=True):
         # Buttons for decryption mode
         tb.Button(main_frame, text="Simulate Cloud Download", command=simulate_upload, style="SmallRedButton.TButton").pack(pady=10)
         tb.Button(main_frame, text="Request Data Access", command=lambda: request_access_window(current_user_id), style="SmallRedButton.TButton").pack(pady=10)
-        'tb.Button(main_frame, text="Upload Excel File", command=upload_file, style="SmallRedButton.TButton").pack(pady=10)'
+        tb.Button(main_frame, text="Upload File", command=upload_file, style="SmallRedButton.TButton").pack(pady=10)
         tb.Button(main_frame, text="Decrypt Data", command=decrypt_data, style="SmallRedButton.TButton").pack(pady=10)
 
-    # Add Admin Dashboard button for admins
-    if current_user_department == 'Admin':
-        tb.Button(main_frame, text="Admin Dashboard", command=show_dashboard, style="SmallRedButton.TButton").pack(pady=10)
+   
+    # 🔙 Return Button
+    tb.Button(main_frame, text="Return", command=lambda: return_to_operation_choice(main_frame), bootstyle="danger-outline").pack(pady=10)
 
     # Add Sign Out button
     tb.Button(main_frame, text="Sign Out", command=create_signin_page, bootstyle="danger-outline").pack(side="top", anchor="nw", padx=10, pady=10)
@@ -1552,24 +2013,31 @@ def create_operation_choice_page():
     choice_frame = tb.Frame(root, padding=(20, 10), bootstyle="white")
     choice_frame.pack(fill="both", expand=True)
 
-    tb.Label(choice_frame, text="Choose Operation", bootstyle="info").pack(pady=10)
+    tb.Label(choice_frame, text="Choose an Operation", font=("Arial", 14, "bold"), bootstyle="primary").pack(pady=20)
 
-    # Use lambda to pass the correct parameter when the button is clicked
-    tb.Button(choice_frame, text="Encryption", command=lambda: create_main_page(is_encryption=True), style="SmallRedButton.TButton").pack(pady=10)
-    tb.Button(choice_frame, text="Decryption", command=lambda: create_main_page(is_encryption=False), style="SmallRedButton.TButton").pack(pady=10)
+    # Encryption & Decryption
+    tb.Button(choice_frame, text="Encryption", command=lambda: create_main_page(is_encryption=True), bootstyle="info-outline").pack(fill="x", padx=50, pady=10)
+    tb.Button(choice_frame, text="Decryption", command=lambda: create_main_page(is_encryption=False), bootstyle="info-outline").pack(fill="x", padx=50, pady=10)
 
-    tb.Button(choice_frame, text="Sign Out", command=create_signin_page, bootstyle="danger-outline").pack(pady=10)
+    # Equipment Management
+    tb.Button(choice_frame, text="Equipment Management", command=manage_equipment, bootstyle="success-outline").pack(fill="x", padx=50, pady=10)
+
+    # Project Management
+    tb.Button(choice_frame, text="Project Management", command=manage_projects, bootstyle="warning-outline").pack(fill="x", padx=50, pady=10)
+
+    # Admin Panel
+    tb.Button(choice_frame, text="Admin panel", command=show_dashboard, bootstyle="danger-outline").pack(fill="x", padx=50, pady=10)
+
+    # Sign Out
+    tb.Button(choice_frame, text="Sign Out", command=create_signin_page, bootstyle="secondary-outline").pack(fill="x", padx=50, pady=20)
 
 
 # Call this function when the application starts to show the sign-in page
 create_signin_page()
+()
 
 
 
-
-
-# Start with the sign-in page
-create_signin_page()
 
 root.mainloop()
 
